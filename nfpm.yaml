@@ -1,0 +1,29 @@
+name: "anyzone"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+section: "net"
+priority: "optional"
+maintainer: "eallion <dev@eallion.com>"
+description: "Universal DNS Management Desktop Client"
+vendor: "AnyZone"
+homepage: "https://github.com/eallion/anyzone"
+license: "MIT"
+
+contents:
+  - src: build/bin/anyzone
+    dst: /usr/bin/anyzone
+    file_info:
+      mode: 0755
+  - src: build/linux/anyzone.desktop
+    dst: /usr/share/applications/anyzone.desktop
+    file_info:
+      mode: 0644
+  - src: build/appicon.png
+    dst: /usr/share/icons/hicolor/256x256/apps/anyzone.png
+    file_info:
+      mode: 0644
+
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.0-37 | libwebkit2gtk-4.1-0
