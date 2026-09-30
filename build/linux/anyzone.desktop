@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=AnyZone
+Comment=Universal DNS Management Desktop Client
+Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 anyzone %u
+Icon=anyzone
+Type=Application
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=AnyZone

@@ -1,0 +1,303 @@
+name: Build and Release AnyZone
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag 版本号 (例如 v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  GOTOOLCHAIN: auto
+
+jobs:
+  build-linux:
+    name: Build Linux Packages (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            appimage_arch: x86_64
+            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            appimage_arch: aarch64
+            appimagetool_url: https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+          cache: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential wget file
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install nfpm (Packaging tool)
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+
+      - name: Build Application Binary
+        run: |
+          go mod tidy
+          wails build -platform linux/${{ matrix.arch }} -tags webkit2_41 -o anyzone
+
+      - name: Package Linux Distributions
+        run: |
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            TAG_NAME="v1.0.0"
+          fi
+          VERSION=${TAG_NAME#v}
+          ARCH=${{ matrix.arch }}
+          export VERSION ARCH
+
+          # 1. 打包 .deb 与 .rpm
+          nfpm pkg --packager deb --target anyzone_${VERSION}_linux_${ARCH}.deb
+          nfpm pkg --packager rpm --target anyzone_${VERSION}_linux_${ARCH}.rpm
+
+          # 2. 打包 .tar.gz
+          tar -czvf anyzone_${VERSION}_linux_${ARCH}.tar.gz -C build/bin anyzone
+
+          # 3. 打包 AppImage
+          mkdir -p anyzone.AppDir/usr/bin
+          mkdir -p anyzone.AppDir/usr/share/applications
+          mkdir -p anyzone.AppDir/usr/share/icons/hicolor/256x256/apps
+
+          cp build/bin/anyzone anyzone.AppDir/usr/bin/anyzone
+          chmod +x anyzone.AppDir/usr/bin/anyzone
+
+          cp build/linux/anyzone.desktop anyzone.AppDir/anyzone.desktop
+          cp build/linux/anyzone.desktop anyzone.AppDir/usr/share/applications/anyzone.desktop
+          cp build/appicon.png anyzone.AppDir/anyzone.png
+          cp build/appicon.png anyzone.AppDir/usr/share/icons/hicolor/256x256/apps/anyzone.png
+
+          cp build/linux/AppRun anyzone.AppDir/AppRun
+          chmod +x anyzone.AppDir/AppRun
+
+          # 下载对应架构的 appimagetool 并解包运行（彻底规避 CI 容器中 FUSE 挂载受限）
+          wget -q ${{ matrix.appimagetool_url }} -O appimagetool
+          chmod +x appimagetool
+          ./appimagetool --appimage-extract
+
+          ARCH=${{ matrix.appimage_arch }} ./squashfs-root/AppRun anyzone.AppDir anyzone_${VERSION}_linux_${ARCH}.AppImage
+          chmod +x anyzone_${VERSION}_linux_${ARCH}.AppImage
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-dist-${{ matrix.arch }}
+          path: |
+            *.AppImage
+            *.deb
+            *.rpm
+            *.tar.gz
+
+  build-windows:
+    name: Build Windows Packages (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+          cache: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install NSIS
+        if: matrix.arch == 'amd64'
+        run: choco install nsis -y
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build Windows Installer & Executable
+        shell: bash
+        run: |
+          export PATH="/c/Program Files (x86)/NSIS:$PATH"
+          go mod tidy
+          ARCH=${{ matrix.arch }}
+          BUILD_FLAGS=""
+          if [ "${ARCH}" = "amd64" ]; then
+            BUILD_FLAGS="-nsis"
+          fi
+          wails build -platform windows/${ARCH} ${BUILD_FLAGS} -o anyzone.exe
+
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            TAG_NAME="v1.0.0"
+          fi
+          VERSION=${TAG_NAME#v}
+
+          # 1. 直接输出独立可执行文件 .exe 到根目录供 Release 下载
+          cp build/bin/anyzone.exe anyzone_${VERSION}_windows_${ARCH}.exe
+
+          # 2. 打包便携版 zip
+          powershell Compress-Archive -Path build/bin/anyzone.exe -DestinationPath anyzone_${VERSION}_windows_${ARCH}_portable.zip
+
+          # 3. 复制 NSIS 安装程序 (若已生成)
+          find build/bin -type f -name "*installer.exe" -exec cp {} anyzone_${VERSION}_windows_${ARCH}_installer.exe \; || true
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-dist-${{ matrix.arch }}
+          path: |
+            *.exe
+            *.zip
+
+  build-macos:
+    name: Build macOS Packages (.dmg)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: 'stable'
+          cache: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install Wails CLI & create-dmg
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+          brew install create-dmg
+
+      - name: Build and Package macOS Apps
+        run: |
+          go mod tidy
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG_NAME="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          else
+            TAG_NAME="v1.0.0"
+          fi
+          VERSION=${TAG_NAME#v}
+
+          # 1. 编译并打包 Apple Silicon (ARM64) 原生版本
+          wails build -platform darwin/arm64 -o anyzone
+          create-dmg \
+            --volname "AnyZone" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 450 175 \
+            "anyzone_${VERSION}_darwin_arm64.dmg" \
+            "build/bin/anyzone.app" || true
+
+          # 清理临时 app 产物以供通用构建
+          rm -rf build/bin/anyzone.app
+
+          # 2. 编译并打包 Universal (通用二进制，包含 ARM64 和 Intel x86_64)
+          wails build -platform darwin/universal -o anyzone
+          create-dmg \
+            --volname "AnyZone" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 450 175 \
+            "anyzone_${VERSION}_darwin_universal.dmg" \
+            "build/bin/anyzone.app" || cp -r build/bin/anyzone.app .
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-dist
+          path: |
+            *.dmg
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux, build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine Tag Name
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v1.0.0"
+          fi
+          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Generate SHA256 Checksums
+        run: |
+          cd artifacts
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create or Update Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.vars.outputs.tag_name }}"
+          echo "准备发布 Release: ${TAG} ..."
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} 已存在，正在覆盖更新所有产物并标记为 Latest..."
+            gh release upload "${TAG}" artifacts/* --clobber
+            gh release edit "${TAG}" --title "AnyZone ${TAG}" --latest
+          else
+            echo "正在创建全新 Release ${TAG} 并上传产物..."
+            gh release create "${TAG}" artifacts/* --title "AnyZone ${TAG}" --generate-notes --latest
+          fi
