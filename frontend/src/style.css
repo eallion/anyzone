@@ -160,15 +160,59 @@ body {
   margin-bottom: 12px;
 }
 
-.brand-logo-img {
-  width: 64px;
-  height: 64px;
-  filter: drop-shadow(0 8px 20px rgba(99, 102, 241, 0.45));
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+.brand-logo-card {
+  perspective: 800px;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 4px auto;
+  cursor: grab;
 }
 
-.brand-logo-img:hover {
-  transform: rotate(6deg) scale(1.08);
+.brand-logo-card-inner {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  transform-style: preserve-3d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  will-change: transform;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4), 0 0 20px rgba(56, 189, 248, 0.15);
+  transition: box-shadow 0.2s ease;
+}
+
+.brand-logo-card-inner.resetting {
+  transition: transform 0.6s cubic-bezier(0.23, 1, 0.32, 1), box-shadow 0.6s ease;
+}
+
+.brand-logo-img {
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+  filter: drop-shadow(0 6px 16px rgba(15, 23, 42, 0.6));
+  pointer-events: none;
+  transform: translateZ(12px);
+  user-select: none;
+}
+
+/* 实体卡片表面反光层 (Specular Glare) */
+.card-glare {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 16px;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.6) 0%, rgba(255, 255, 255, 0) 70%);
+  opacity: 0;
+  mix-blend-mode: overlay;
+  transition: opacity 0.2s ease;
+  transform: translateZ(24px);
 }
 
 .brand-logo-text {
@@ -198,8 +242,9 @@ body {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-bottom: 20px;
-  min-height: 40px;
+  margin-bottom: 24px;
+  min-height: 56px;
+  cursor: text;
 }
 
 .pin-input-group input {
@@ -209,7 +254,8 @@ body {
   height: 100%;
   top: 0;
   left: 0;
-  cursor: default;
+  cursor: text;
+  z-index: 2;
 }
 
 .pin-dots {
@@ -217,31 +263,107 @@ body {
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 10px;
-  min-height: 24px;
+  gap: 12px;
+  min-height: 54px;
   padding: 4px;
+  transition: all 0.25s ease;
 }
 
-.pin-dots .dot {
-  width: 13px;
-  height: 13px;
-  border-radius: var(--radius-full);
-  background: var(--color-primary);
-  box-shadow: 0 0 10px rgba(83, 155, 245, 0.7);
-  animation: popIn 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+/* 每一个独立的 PIN 字符框 (默认至少 4 个) */
+.pin-slot {
+  position: relative;
+  width: 48px;
+  height: 54px;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1.5px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.05);
 }
 
-.pin-dots .placeholder-bar {
-  width: 60px;
-  height: 3px;
-  border-radius: var(--radius-full);
-  background: var(--border-color);
-  transition: background-color 0.2s;
+/* 密集模式（输入多于 6 位时自适应紧凑尺寸） */
+.pin-dots.dense {
+  gap: 8px;
+}
+.pin-dots.dense .pin-slot {
+  width: 36px;
+  height: 44px;
+  border-radius: 9px;
 }
 
-@keyframes popIn {
-  from { transform: scale(0.3); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+/* 当前待输入的框（聚焦光标高亮） */
+.pin-slot.active {
+  border-color: #38bdf8;
+  background: rgba(56, 189, 248, 0.08);
+  box-shadow: 0 0 18px rgba(56, 189, 248, 0.35), inset 0 0 8px rgba(56, 189, 248, 0.15);
+  transform: translateY(-2px);
+}
+
+.pin-slot.active::after {
+  content: '';
+  width: 2px;
+  height: 22px;
+  background: #38bdf8;
+  border-radius: 2px;
+  box-shadow: 0 0 8px #38bdf8;
+  animation: cursorBlink 1s infinite ease-in-out;
+}
+
+.pin-dots.dense .pin-slot.active::after {
+  height: 18px;
+}
+
+@keyframes cursorBlink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+
+/* 已填入字符的框 */
+.pin-slot.filled {
+  border-color: rgba(99, 102, 241, 0.6);
+  background: rgba(30, 41, 59, 0.85);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), inset 0 0 10px rgba(99, 102, 241, 0.15);
+}
+
+/* 位数满足时的输入停顿感知微光待验证态 */
+.pin-slot.filled.verifying-pause {
+  border-color: #38bdf8;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.5), inset 0 0 8px rgba(56, 189, 248, 0.2);
+  animation: pulsePause 0.45s ease-in-out infinite alternate;
+}
+
+@keyframes pulsePause {
+  from {
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.35), inset 0 0 6px rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.7);
+  }
+  to {
+    box-shadow: 0 0 20px rgba(56, 189, 248, 0.65), inset 0 0 12px rgba(56, 189, 248, 0.3);
+    border-color: #38bdf8;
+  }
+}
+
+.pin-slot.filled .dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #38bdf8, #818cf8);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.75);
+  animation: slotPopIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+.pin-dots.dense .pin-slot.filled .dot {
+  width: 11px;
+  height: 11px;
+}
+
+@keyframes slotPopIn {
+  0% { transform: scale(0.2); opacity: 0; }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 .error-text {

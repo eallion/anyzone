@@ -9,9 +9,8 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag 版本号 (例如 v1.0.0)'
-        required: false
-        default: 'v1.0.0'
+        description: 'Release Tag 版本号 (例如 v1.0.1)'
+        required: true
 
 permissions:
   contents: write
@@ -21,8 +20,42 @@ env:
   GOTOOLCHAIN: auto
 
 jobs:
+  prep:
+    name: Prepare Version Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      is_release: ${{ steps.version.outputs.is_release }}
+    steps:
+      - name: Determine Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+            IS_RELEASE="true"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            IS_RELEASE="true"
+          else
+            TAG="nightly"
+            IS_RELEASE="false"
+          fi
+
+          if [ "${TAG}" = "nightly" ]; then
+            VER="0.0.0-nightly.${{ github.run_number }}"
+          else
+            VER="${TAG#v}"
+          fi
+
+          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+          echo "is_release=${IS_RELEASE}" >> $GITHUB_OUTPUT
+          echo "准备构建版本: Tag=${TAG}, Version=${VER}, IsRelease=${IS_RELEASE}"
+
   build-linux:
     name: Build Linux Packages (${{ matrix.arch }})
+    needs: prep
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -65,19 +98,19 @@ jobs:
       - name: Build Application Binary
         run: |
           go mod tidy
-          wails build -platform linux/${{ matrix.arch }} -tags webkit2_41 -o anyzone
+          VERSION="${{ needs.prep.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
+            c.info.productVersion = '${VERSION}';
+            fs.writeFileSync('wails.json', JSON.stringify(c, null, 2));
+          "
+          wails build -platform linux/${{ matrix.arch }} -tags webkit2_41 -ldflags "-X main.AppVersion=${VERSION}" -o anyzone
 
       - name: Package Linux Distributions
         run: |
-          if [ -n "${{ inputs.tag_name }}" ]; then
-            TAG_NAME="${{ inputs.tag_name }}"
-          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            TAG_NAME="${GITHUB_REF_NAME}"
-          else
-            TAG_NAME="v1.0.0"
-          fi
-          VERSION=${TAG_NAME#v}
-          ARCH=${{ matrix.arch }}
+          VERSION="${{ needs.prep.outputs.version }}"
+          ARCH="${{ matrix.arch }}"
           export VERSION ARCH
 
           # 1. 打包 .deb 与 .rpm
@@ -103,7 +136,7 @@ jobs:
           cp build/linux/AppRun anyzone.AppDir/AppRun
           chmod +x anyzone.AppDir/AppRun
 
-          # 下载对应架构的 appimagetool 并解包运行（彻底规避 CI 容器中 FUSE 挂载受限）
+          # 下载对应架构的 appimagetool 并解包运行
           wget -q ${{ matrix.appimagetool_url }} -O appimagetool
           chmod +x appimagetool
           ./appimagetool --appimage-extract
@@ -123,6 +156,7 @@ jobs:
 
   build-windows:
     name: Build Windows Packages (${{ matrix.arch }})
+    needs: prep
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -155,23 +189,21 @@ jobs:
         run: |
           export PATH="/c/Program Files (x86)/NSIS:$PATH"
           go mod tidy
+          VERSION="${{ needs.prep.outputs.version }}"
           ARCH=${{ matrix.arch }}
           BUILD_FLAGS=""
           if [ "${ARCH}" = "amd64" ]; then
             BUILD_FLAGS="-nsis"
           fi
-          wails build -platform windows/${ARCH} ${BUILD_FLAGS} -o anyzone.exe
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
+            c.info.productVersion = '${VERSION}';
+            fs.writeFileSync('wails.json', JSON.stringify(c, null, 2));
+          "
+          wails build -platform windows/${ARCH} ${BUILD_FLAGS} -ldflags "-X main.AppVersion=${VERSION}" -o anyzone.exe
 
-          if [ -n "${{ inputs.tag_name }}" ]; then
-            TAG_NAME="${{ inputs.tag_name }}"
-          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            TAG_NAME="${GITHUB_REF_NAME}"
-          else
-            TAG_NAME="v1.0.0"
-          fi
-          VERSION=${TAG_NAME#v}
-
-          # 1. 直接输出独立可执行文件 .exe 到根目录供 Release 下载
+          # 1. 直接输出独立可执行文件 .exe 到根目录供下载
           cp build/bin/anyzone.exe anyzone_${VERSION}_windows_${ARCH}.exe
 
           # 2. 打包便携版 zip
@@ -190,6 +222,7 @@ jobs:
 
   build-macos:
     name: Build macOS Packages (.dmg)
+    needs: prep
     runs-on: macos-latest
     steps:
       - name: Checkout Code
@@ -214,17 +247,17 @@ jobs:
       - name: Build and Package macOS Apps
         run: |
           go mod tidy
-          if [ -n "${{ inputs.tag_name }}" ]; then
-            TAG_NAME="${{ inputs.tag_name }}"
-          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            TAG_NAME="${GITHUB_REF_NAME}"
-          else
-            TAG_NAME="v1.0.0"
-          fi
-          VERSION=${TAG_NAME#v}
+          VERSION="${{ needs.prep.outputs.version }}"
+
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
+            c.info.productVersion = '${VERSION}';
+            fs.writeFileSync('wails.json', JSON.stringify(c, null, 2));
+          "
 
           # 1. 编译并打包 Apple Silicon (ARM64) 原生版本
-          wails build -platform darwin/arm64 -o anyzone
+          wails build -platform darwin/arm64 -ldflags "-X main.AppVersion=${VERSION}" -o anyzone
           create-dmg \
             --volname "AnyZone" \
             --window-pos 200 120 \
@@ -238,7 +271,7 @@ jobs:
           rm -rf build/bin/anyzone.app
 
           # 2. 编译并打包 Universal (通用二进制，包含 ARM64 和 Intel x86_64)
-          wails build -platform darwin/universal -o anyzone
+          wails build -platform darwin/universal -ldflags "-X main.AppVersion=${VERSION}" -o anyzone
           create-dmg \
             --volname "AnyZone" \
             --window-pos 200 120 \
@@ -257,7 +290,8 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    needs: [build-linux, build-windows, build-macos]
+    needs: [prep, build-linux, build-windows, build-macos]
+    if: needs.prep.outputs.is_release == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -269,18 +303,6 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: Determine Tag Name
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.tag_name }}" ]; then
-            TAG="${{ inputs.tag_name }}"
-          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9] ]]; then
-            TAG="${GITHUB_REF_NAME}"
-          else
-            TAG="v1.0.0"
-          fi
-          echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
-
       - name: Generate SHA256 Checksums
         run: |
           cd artifacts
@@ -291,7 +313,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${{ steps.vars.outputs.tag_name }}"
+          TAG="${{ needs.prep.outputs.tag_name }}"
           echo "准备发布 Release: ${TAG} ..."
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "Release ${TAG} 已存在，正在覆盖更新所有产物并标记为 Latest..."

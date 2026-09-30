@@ -593,3 +593,8 @@ func (a *App) DeleteRecord(accountID, zoneID, zoneName, recordID string) error {
 
 	return p.DeleteRecord(ctx, zoneID, zoneName, recordID)
 }
+
+// GetAppVersion 返回当前运行的应用编译版本号
+func (a *App) GetAppVersion() string {
+	return AppVersion
+}

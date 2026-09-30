@@ -24,6 +24,9 @@ func init() {
 	}
 }
 
+// AppVersion 应用编译版本号，CI 编译时可通过 -ldflags "-X main.AppVersion=x.y.z" 动态覆盖
+var AppVersion = "1.0.0"
+
 //go:embed all:frontend
 var frontendAssets embed.FS
 

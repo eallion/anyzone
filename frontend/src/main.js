@@ -108,6 +108,7 @@ const backend = {
   createRecord: async (accId, zId, zName, rec) => window.go?.main?.App?.CreateRecord(accId, zId, zName, rec),
   updateRecord: async (accId, zId, zName, rec) => window.go?.main?.App?.UpdateRecord(accId, zId, zName, rec),
   deleteRecord: async (accId, zId, zName, rId) => window.go?.main?.App?.DeleteRecord(accId, zId, zName, rId),
+  getAppVersion: async () => window.go?.main?.App?.GetAppVersion() ?? '1.0.0',
 };
 
 // UI 元素索引
@@ -384,6 +385,7 @@ async function initSecurity() {
 }
 
 function showPinOverlay() {
+  clearPinAutoSubmit();
   el.pinOverlay.classList.add('active');
   el.pinInput.value = '';
   updatePinDots();
@@ -392,26 +394,48 @@ function showPinOverlay() {
 }
 
 function hidePinOverlay() {
+  clearPinAutoSubmit();
   el.pinOverlay.classList.remove('active');
   el.pinInput.value = '';
   updatePinDots();
 }
 
 function updatePinDots() {
-  const len = el.pinInput.value.length;
-  if (len === 0) {
-    el.pinDots.innerHTML = '<div class="placeholder-bar"></div>';
-    return;
+  const value = el.pinInput.value;
+  const len = value.length;
+  const maxSlots = 16;
+
+  // 默认至少展示 4 个框；当输入满 4 位（len >= 4）且未达上限时，动态追加下一个待输入框 (len + 1)
+  let totalSlots = 4;
+  if (len >= 4) {
+    totalSlots = Math.min(maxSlots, len + 1);
+  }
+
+  // 框数量多时启用自适应紧凑样式
+  if (totalSlots > 6) {
+    el.pinDots.classList.add('dense');
+  } else {
+    el.pinDots.classList.remove('dense');
   }
 
   let html = '';
-  for (let i = 0; i < len; i++) {
-    html += '<span class="dot"></span>';
+  for (let i = 0; i < totalSlots; i++) {
+    if (i < len) {
+      // 已输入
+      html += '<div class="pin-slot filled"><span class="dot"></span></div>';
+    } else if (i === len) {
+      // 当前待输入的槽位（聚焦中，显示呼吸光标）
+      html += '<div class="pin-slot active"></div>';
+    } else {
+      // 预留待输入的空框
+      html += '<div class="pin-slot empty"></div>';
+    }
   }
   el.pinDots.innerHTML = html;
 }
 
 async function handlePinSubmit() {
+  clearPinAutoSubmit();
   const pin = el.pinInput.value.trim();
   if (pin.length < 4) {
     showPinError('PIN 码长度至少 4 位');
@@ -1542,23 +1566,158 @@ document.getElementById('btn-execute-change-pin').addEventListener('click', asyn
 });
 
 // ==========================================================================
+// 3D 实体卡片视差翻转动效 (全屏全景鼠标注视与界面外方向保持)
+// ==========================================================================
+
+function initBrandLogoCard3D() {
+  const card = document.getElementById('brand-logo-card');
+  const inner = card?.querySelector('.brand-logo-card-inner');
+  const glare = card?.querySelector('.card-glare');
+
+  if (!card || !inner) return;
+
+  let rafId = null;
+  let lastDirX = 0;
+  let lastDirY = 0;
+
+  function applyTilt(rotateX, rotateY, glareX, glareY, glareOpacity, smooth = false) {
+    if (smooth) {
+      inner.classList.add('resetting');
+    } else {
+      inner.classList.remove('resetting');
+    }
+
+    inner.style.transform = `perspective(900px) rotateX(${rotateX.toFixed(2)}deg) rotateY(${rotateY.toFixed(2)}deg) scale3d(1.08, 1.08, 1.08)`;
+
+    if (glare) {
+      glare.style.opacity = glareOpacity.toFixed(2);
+      glare.style.background = `radial-gradient(circle at ${glareX.toFixed(1)}% ${glareY.toFixed(1)}%, rgba(255, 255, 255, 0.65) 0%, rgba(255, 255, 255, 0) 70%)`;
+    }
+  }
+
+  // 根据指针坐标计算朝向
+  function updateTiltToMouse(clientX, clientY) {
+    const rect = card.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+
+    const dx = clientX - centerX;
+    const dy = clientY - centerY;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist > 0) {
+      lastDirX = dx / dist;
+      lastDirY = dy / dist;
+    }
+
+    // 全屏视差强度映射：中心 0 到 屏幕视口对角线
+    const maxViewportDist = Math.max(window.innerWidth, window.innerHeight) * 0.55;
+    const intensity = Math.min(1.0, Math.pow(dist / maxViewportDist, 0.72));
+
+    const maxTilt = 32; // 最大翻转 32 度
+    // 鼠标在上方(dy < 0)，卡片向上抬头(rotateX > 0)；鼠标在下方(dy > 0)，卡片向下俯首(rotateX < 0)
+    const rotateX = -lastDirY * intensity * maxTilt;
+    // 鼠标在右方(dx > 0)，卡片向右偏航(rotateY > 0)；鼠标在左方(dx < 0)，卡片向左偏航(rotateY < 0)
+    const rotateY = lastDirX * intensity * maxTilt;
+
+    // 全息高光跟随朝向
+    const glareX = ((lastDirX * intensity + 1) / 2) * 100;
+    const glareY = ((lastDirY * intensity + 1) / 2) * 100;
+    const glareOpacity = Math.min(0.65, Math.max(0.12, intensity * 0.7));
+
+    applyTilt(rotateX, rotateY, glareX, glareY, glareOpacity, false);
+  }
+
+  function handleMouseMove(e) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      updateTiltToMouse(e.clientX, e.clientY);
+    });
+  }
+
+  // 当鼠标移出当前应用窗口（界面外）时：
+  // 保持卡片朝向指针离开的方向，呈现注视窗外鼠标的效果
+  function handleMouseLeaveWindow() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      const maxTilt = 32;
+      const rotateX = -lastDirY * maxTilt;
+      const rotateY = lastDirX * maxTilt;
+      const glareX = ((lastDirX + 1) / 2) * 100;
+      const glareY = ((lastDirY + 1) / 2) * 100;
+      applyTilt(rotateX, rotateY, glareX, glareY, 0.45, true);
+    });
+  }
+
+  function handleMouseEnterWindow(e) {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      updateTiltToMouse(e.clientX, e.clientY);
+    });
+  }
+
+  // 全屏全窗口监听鼠标指针
+  window.addEventListener('mousemove', handleMouseMove, { passive: true });
+  document.documentElement.addEventListener('mouseleave', handleMouseLeaveWindow, { passive: true });
+  document.documentElement.addEventListener('mouseenter', handleMouseEnterWindow, { passive: true });
+}
+
+// ==========================================================================
 // 全局事件监听与初始化绑定
 // ==========================================================================
 
+let pinAutoSubmitTimer = null;
+
+function clearPinAutoSubmit() {
+  if (pinAutoSubmitTimer) {
+    clearTimeout(pinAutoSubmitTimer);
+    pinAutoSubmitTimer = null;
+  }
+  const pendingSlot = el.pinDots?.querySelector('.pin-slot.verifying-pause');
+  if (pendingSlot) pendingSlot.classList.remove('verifying-pause');
+}
+
 function bindEvents() {
+  initBrandLogoCard3D();
+
+  el.pinDots.addEventListener('click', () => {
+    el.pinInput.focus();
+  });
+
   el.pinInput.addEventListener('input', () => {
+    clearPinAutoSubmit();
     updatePinDots();
+
     const len = el.pinInput.value.length;
-    if (state.pinMode === 'unlock' && state.settings.pin_length && len === state.settings.pin_length) {
-      handlePinSubmit();
+    const targetLength = state.settings.pin_length || 4;
+
+    // 当处于解锁模式且输入位数满足目标长度时，不秒进，启动输入停顿感知延迟检测 (Pause Detection)
+    if (state.pinMode === 'unlock' && len >= targetLength) {
+      const lastFilledSlot = el.pinDots.querySelector('.pin-slot.filled:last-of-type');
+      if (lastFilledSlot) {
+        lastFilledSlot.classList.add('verifying-pause');
+      }
+
+      // 延迟 480ms 检测用户是否停止输入
+      pinAutoSubmitTimer = setTimeout(() => {
+        if (state.pinMode === 'unlock' && el.pinInput.value.length >= targetLength) {
+          handlePinSubmit();
+        }
+      }, 480);
     }
   });
 
   el.pinInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') handlePinSubmit();
+    if (e.key === 'Enter') {
+      clearPinAutoSubmit();
+      handlePinSubmit();
+    }
   });
 
-  el.btnSubmitPin.addEventListener('click', handlePinSubmit);
+  el.btnSubmitPin.addEventListener('click', () => {
+    clearPinAutoSubmit();
+    handlePinSubmit();
+  });
 
   window.addEventListener('keydown', (e) => {
     resetIdleTimer();
@@ -1719,8 +1878,22 @@ function bindEvents() {
   }
 }
 
+// 动态初始化应用版本号
+async function initAppVersion() {
+  try {
+    const ver = await backend.getAppVersion();
+    const linkEl = document.getElementById('link-app-version');
+    if (linkEl && ver) {
+      linkEl.textContent = ver.startsWith('v') ? ver : `v${ver}`;
+    }
+  } catch (err) {
+    console.warn('获取应用版本号异常:', err);
+  }
+}
+
 // 启动入口
 window.addEventListener('DOMContentLoaded', () => {
+  initAppVersion();
   bindEvents();
   initCustomSelects();
   initSecurity();
