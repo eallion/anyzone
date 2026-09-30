@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      semver_clean: ${{ steps.version.outputs.semver_clean }}
       tag_name: ${{ steps.version.outputs.tag_name }}
       is_release: ${{ steps.version.outputs.is_release }}
     steps:
@@ -44,14 +45,23 @@ jobs:
 
           if [ "${TAG}" = "nightly" ]; then
             VER="0.0.0-nightly.${{ github.run_number }}"
+            SEMVER_CLEAN="0.0.0.${{ github.run_number }}"
           else
-            VER="${TAG#v}"
+            CLEAN="${TAG#v}"
+            VER="${CLEAN}"
+            BASE=$(echo "${CLEAN}" | cut -d'-' -f1)
+            IFS='.' read -r -a P <<< "${BASE}"
+            MAJOR=${P[0]:-0}
+            MINOR=${P[1]:-0}
+            PATCH=${P[2]:-0}
+            SEMVER_CLEAN="${MAJOR}.${MINOR}.${PATCH}.0"
           fi
 
           echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${VER}" >> $GITHUB_OUTPUT
+          echo "semver_clean=${SEMVER_CLEAN}" >> $GITHUB_OUTPUT
           echo "is_release=${IS_RELEASE}" >> $GITHUB_OUTPUT
-          echo "准备构建版本: Tag=${TAG}, Version=${VER}, IsRelease=${IS_RELEASE}"
+          echo "准备构建版本: Tag=${TAG}, Version=${VER}, SemverClean=${SEMVER_CLEAN}, IsRelease=${IS_RELEASE}"
 
   build-linux:
     name: Build Linux Packages (${{ matrix.arch }})
@@ -102,7 +112,7 @@ jobs:
           node -e "
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
-            c.info.productVersion = '${VERSION}';
+            c.info.productVersion = '${{ needs.prep.outputs.semver_clean }}';
             fs.writeFileSync('wails.json', JSON.stringify(c, null, 2));
           "
           wails build -platform linux/${{ matrix.arch }} -tags webkit2_41 -ldflags "-X main.AppVersion=${VERSION}" -o anyzone
@@ -198,7 +208,7 @@ jobs:
           node -e "
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
-            c.info.productVersion = '${VERSION}';
+            c.info.productVersion = '${{ needs.prep.outputs.semver_clean }}';
             fs.writeFileSync('wails.json', JSON.stringify(c, null, 2));
           "
           wails build -platform windows/${ARCH} ${BUILD_FLAGS} -ldflags "-X main.AppVersion=${VERSION}" -o anyzone.exe
@@ -252,7 +262,7 @@ jobs:
           node -e "
             const fs = require('fs');
             const c = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
-            c.info.productVersion = '${VERSION}';
+            c.info.productVersion = '${{ needs.prep.outputs.semver_clean }}';
             fs.writeFileSync('wails.json', JSON.stringify(c, null, 2));
           "
 
