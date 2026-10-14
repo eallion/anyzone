@@ -17,18 +17,10 @@ var (
 	iconData []byte
 )
 
-// GetAppIconPNG 获取 512x512 AnyZone 高清 PNG 图标字节流
+// GetAppIconPNG 获取 512x512 AnyZone 高清 PNG 图标字节流（纯内存生成与缓存，不向工作目录落盘）
 func GetAppIconPNG() []byte {
 	iconOnce.Do(func() {
 		iconData = generateIconPNG(512)
-		// 确保项目根目录与当前运行目录下的 build/appicon.png 均得到同步落盘
-		for _, candidate := range []string{"build", "../../../build", "../../build"} {
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-				_ = os.WriteFile(filepath.Join(candidate, "appicon.png"), iconData, 0644)
-			}
-		}
-		_ = os.MkdirAll("build", 0755)
-		_ = os.WriteFile(filepath.Join("build", "appicon.png"), iconData, 0644)
 	})
 	return iconData
 }
