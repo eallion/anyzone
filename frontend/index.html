@@ -38,6 +38,9 @@
       <div class="pin-actions">
         <button id="btn-submit-pin" class="btn btn-primary btn-block">解锁</button>
       </div>
+      <div class="pin-footer-actions" id="pin-reset-container" style="display: none;">
+        <button id="btn-forgot-pin" class="btn-link" type="button">忘记 PIN 码？重置应用</button>
+      </div>
     </div>
   </div>
 
@@ -130,18 +133,19 @@
           <table class="data-table" id="records-table">
             <thead>
               <tr>
-                <th style="width: 100px;">类型</th>
-                <th style="width: 180px;">主机记录 (Name)</th>
+                <th style="width: 90px;">类型</th>
+                <th style="width: 170px;">主机记录 (Name)</th>
                 <th>记录值 (Content)</th>
-                <th style="width: 110px;">TTL</th>
-                <th style="width: 100px;">CDN 代理</th>
-                <th style="width: 140px;">备注</th>
-                <th style="width: 130px; text-align: right;">操作</th>
+                <th style="width: 110px;">线路 / 分区</th>
+                <th style="width: 90px;">TTL</th>
+                <th style="width: 90px;">CDN 代理</th>
+                <th style="width: 130px;">备注</th>
+                <th style="width: 120px; text-align: right;">操作</th>
               </tr>
             </thead>
             <tbody id="records-tbody">
               <tr>
-                <td colspan="7" class="empty-row">请从左侧选择域名以查看解析记录</td>
+                <td colspan="8" class="empty-row">请从左侧选择域名以查看解析记录</td>
               </tr>
             </tbody>
           </table>
@@ -414,7 +418,13 @@
         </div>
 
         <div class="form-row">
-          <div class="form-group col-6">
+          <div class="form-group col-6" id="group-rec-line" style="display: none;">
+            <label for="rec-line">解析线路 / 分区</label>
+            <select id="rec-line">
+              <option value="default">默认</option>
+            </select>
+          </div>
+          <div class="form-group col-6" id="group-rec-ttl">
             <label for="rec-ttl">TTL (秒)</label>
             <select id="rec-ttl">
               <option value="1">自动 (Automatic)</option>

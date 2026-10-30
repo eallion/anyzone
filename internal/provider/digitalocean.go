@@ -141,6 +141,11 @@ func (p *DigitalOceanProvider) ListRecords(ctx context.Context, zoneID string, z
 	return records, nil
 }
 
+// GetSupportLines DigitalOcean 无运营商分区线路
+func (p *DigitalOceanProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	return nil, nil
+}
+
 func (p *DigitalOceanProvider) CreateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error) {
 	payload := map[string]any{
 		"type": r.Type,

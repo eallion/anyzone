@@ -17,6 +17,7 @@ const state = {
   expandAllZones: false, // 是否临时展开超出设置限制的域名
   nsCache: {}, // 域名公网权威 NS 缓存，严格以 account_id:domain 为唯一键隔离
   records: [],
+  currentZoneLines: [], // 当前域名支持的解析线路/分区列表
   settings: {},
   idleTimer: null,
 };
@@ -108,6 +109,8 @@ const backend = {
   createRecord: async (accId, zId, zName, rec) => window.go?.main?.App?.CreateRecord(accId, zId, zName, rec),
   updateRecord: async (accId, zId, zName, rec) => window.go?.main?.App?.UpdateRecord(accId, zId, zName, rec),
   deleteRecord: async (accId, zId, zName, rId) => window.go?.main?.App?.DeleteRecord(accId, zId, zName, rId),
+  getZoneLines: async (accId, zId, zName) => window.go?.main?.App?.GetZoneLines(accId, zId, zName) ?? [],
+  resetApp: async () => window.go?.main?.App?.ResetApp(),
   getAppVersion: async () => window.go?.main?.App?.GetAppVersion() ?? '1.0.0',
 };
 
@@ -121,6 +124,8 @@ const el = {
   pinDots: document.getElementById('pin-dots'),
   pinError: document.getElementById('pin-error'),
   btnSubmitPin: document.getElementById('btn-submit-pin'),
+  btnForgotPin: document.getElementById('btn-forgot-pin'),
+  pinResetContainer: document.getElementById('pin-reset-container'),
 
   globalSearch: document.getElementById('global-search'),
   proxyIndicator: document.getElementById('proxy-indicator'),
@@ -148,6 +153,8 @@ const el = {
   // 模态框
   modalAccount: document.getElementById('modal-account'),
   modalRecord: document.getElementById('modal-record'),
+  groupRecLine: document.getElementById('group-rec-line'),
+  recLine: document.getElementById('rec-line'),
   modalSettings: document.getElementById('modal-settings'),
   toastContainer: document.getElementById('toast-container'),
 
@@ -349,6 +356,15 @@ function syncCustomSelect(selectEl) {
   });
 }
 
+function rebuildCustomSelect(selectEl) {
+  if (!selectEl) return;
+  const oldWrapper = selectEl.nextElementSibling;
+  if (oldWrapper && oldWrapper.classList.contains('custom-select-wrapper')) {
+    oldWrapper.remove();
+  }
+  enhanceSelect(selectEl);
+}
+
 function initCustomSelects() {
   document.querySelectorAll('select:not(.select-page-size)').forEach(enhanceSelect);
   document.addEventListener('click', closeAllDropdowns);
@@ -372,11 +388,13 @@ async function initSecurity() {
       el.pinTitle.textContent = '初始化安全 PIN 码';
       el.pinSubtitle.textContent = '请设置安全 PIN 码 (4~16位)';
       el.btnSubmitPin.textContent = '确认并初始化';
+      if (el.pinResetContainer) el.pinResetContainer.style.display = 'none';
     } else {
       state.pinMode = 'unlock';
       el.pinTitle.textContent = '安全验证';
       el.pinSubtitle.textContent = '请输入安全 PIN 码解锁';
       el.btnSubmitPin.textContent = '解锁';
+      if (el.pinResetContainer) el.pinResetContainer.style.display = 'block';
     }
     showPinOverlay();
   } catch (err) {
@@ -492,6 +510,7 @@ async function lockApp() {
   el.pinTitle.textContent = '安全验证';
   el.pinSubtitle.textContent = '请输入安全 PIN 码解锁';
   el.btnSubmitPin.textContent = '解锁';
+  if (el.pinResetContainer) el.pinResetContainer.style.display = 'block';
   showPinOverlay();
 }
 
@@ -979,18 +998,28 @@ async function selectZone(zone) {
 async function loadRecords() {
   if (!state.selectedAccount || !state.selectedZone) return;
 
-  el.recordsTbody.innerHTML = '<tr><td colspan="7" class="empty-row">正在加载解析记录...</td></tr>';
+  el.recordsTbody.innerHTML = '<tr><td colspan="8" class="empty-row">正在加载解析记录...</td></tr>';
   try {
-    const res = await backend.listRecords(
-      state.selectedAccount.id,
-      state.selectedZone.id,
-      state.selectedZone.name
-    );
+    const [res, lines] = await Promise.all([
+      backend.listRecords(
+        state.selectedAccount.id,
+        state.selectedZone.id,
+        state.selectedZone.name
+      ),
+      backend.getZoneLines(
+        state.selectedAccount.id,
+        state.selectedZone.id,
+        state.selectedZone.name
+      ).catch(() => []),
+    ]);
+
     state.records = Array.isArray(res) ? res : [];
+    state.currentZoneLines = Array.isArray(lines) ? lines : [];
     renderRecords();
   } catch (err) {
     state.records = [];
-    el.recordsTbody.innerHTML = `<tr><td colspan="7" class="empty-row" style="color: var(--color-danger)">加载失败: ${err.message || err}</td></tr>`;
+    state.currentZoneLines = [];
+    el.recordsTbody.innerHTML = `<tr><td colspan="8" class="empty-row" style="color: var(--color-danger)">加载失败: ${err.message || err}</td></tr>`;
     showToast(`获取解析记录失败: ${err}`, 'error');
   }
 }
@@ -1003,6 +1032,8 @@ function renderRecords() {
     return r.name.toLowerCase().includes(query) ||
            r.content.toLowerCase().includes(query) ||
            r.type.toLowerCase().includes(query) ||
+           (r.line_name && r.line_name.toLowerCase().includes(query)) ||
+           (r.line && r.line.toLowerCase().includes(query)) ||
            (r.comment && r.comment.toLowerCase().includes(query));
   });
 
@@ -1010,7 +1041,7 @@ function renderRecords() {
   el.recordsTbody.innerHTML = '';
 
   if (filtered.length === 0) {
-    el.recordsTbody.innerHTML = '<tr><td colspan="7" class="empty-row">暂无符合条件的解析记录</td></tr>';
+    el.recordsTbody.innerHTML = '<tr><td colspan="8" class="empty-row">暂无符合条件的解析记录</td></tr>';
     return;
   }
 
@@ -1026,10 +1057,18 @@ function renderRecords() {
 
     const ttlDisplay = rec.ttl === 1 ? '自动' : `${rec.ttl}s`;
 
+    let lineBadge = '-';
+    if (rec.line || rec.line_name) {
+      const isCustomLine = rec.line && rec.line !== 'default' && rec.line !== '默认' && rec.line !== 'DEFAULT_LINE';
+      const displayName = rec.line_name || rec.line || '默认';
+      lineBadge = `<span class="line-badge ${isCustomLine ? 'active' : ''}">${escapeHtml(displayName)}</span>`;
+    }
+
     tr.innerHTML = `
       <td><span class="type-badge type-${rec.type}">${rec.type}</span></td>
       <td><span class="record-name">${escapeHtml(rec.name)}</span></td>
       <td><span class="record-content">${escapeHtml(rec.content)}</span></td>
+      <td>${lineBadge}</td>
       <td>${ttlDisplay}</td>
       <td>${proxiedHtml}</td>
       <td><span style="color: var(--text-muted); font-size: 12px;">${escapeHtml(rec.comment || '-')}</span></td>
@@ -1078,6 +1117,38 @@ async function handleDeleteRecord(rec) {
 // 模态框交互：新增/编辑解析记录
 // ==========================================================================
 
+function setupRecordLineSelector(selectedLine) {
+  const lineGroup = el.groupRecLine;
+  const lineSelect = el.recLine;
+  if (!lineGroup || !lineSelect) return;
+
+  if (state.currentZoneLines && state.currentZoneLines.length > 0) {
+    lineSelect.innerHTML = '';
+    state.currentZoneLines.forEach(l => {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.textContent = l.name;
+      lineSelect.appendChild(opt);
+    });
+
+    if (selectedLine) {
+      lineSelect.value = selectedLine;
+      if (!lineSelect.value) {
+        const found = state.currentZoneLines.find(x => x.name === selectedLine || x.id === selectedLine);
+        if (found) lineSelect.value = found.id;
+      }
+    }
+    if (!lineSelect.value && state.currentZoneLines.length > 0) {
+      lineSelect.value = state.currentZoneLines[0].id;
+    }
+
+    rebuildCustomSelect(lineSelect);
+    lineGroup.style.display = 'block';
+  } else {
+    lineGroup.style.display = 'none';
+  }
+}
+
 function openAddRecordModal() {
   document.getElementById('modal-record-title').textContent = '新增解析记录';
   document.getElementById('rec-id').value = '';
@@ -1092,6 +1163,7 @@ function openAddRecordModal() {
   syncCustomSelect(document.getElementById('rec-type'));
   syncCustomSelect(document.getElementById('rec-ttl'));
 
+  setupRecordLineSelector('');
   updateRecordModalFields();
   el.modalRecord.classList.add('active');
 }
@@ -1110,6 +1182,7 @@ function openEditRecordModal(rec) {
   syncCustomSelect(document.getElementById('rec-type'));
   syncCustomSelect(document.getElementById('rec-ttl'));
 
+  setupRecordLineSelector(rec.line || rec.line_name || '');
   updateRecordModalFields();
   el.modalRecord.classList.add('active');
 }
@@ -1133,6 +1206,9 @@ async function handleSaveRecord() {
   const priority = parseInt(document.getElementById('rec-priority').value, 10);
   const proxied = document.getElementById('rec-proxied').checked;
   const comment = document.getElementById('rec-comment').value.trim();
+  const line = (el.groupRecLine && el.groupRecLine.style.display !== 'none' && el.recLine)
+    ? el.recLine.value
+    : '';
 
   if (!name || !content) {
     showToast('主机记录和记录值不能为空', 'error');
@@ -1147,6 +1223,7 @@ async function handleSaveRecord() {
     ttl,
     priority: (type === 'MX' || type === 'SRV') ? priority : 0,
     comment,
+    line,
   };
 
   if (state.selectedZone?.provider === 'cloudflare') {
@@ -1718,6 +1795,28 @@ function bindEvents() {
     clearPinAutoSubmit();
     handlePinSubmit();
   });
+
+  if (el.btnForgotPin) {
+    el.btnForgotPin.addEventListener('click', async () => {
+      const ok = confirm(
+        '【警告】由于采用金融级零知识本地加密（Argon2id + AES-256-GCM），PIN 码无法明文找回。\n\n' +
+        '重置应用将安全清空本地保存的全部云厂商凭据并允许您重新设置新的 PIN 码进入应用。\n\n' +
+        '确定要重置应用吗？'
+      );
+      if (!ok) return;
+
+      try {
+        await backend.resetApp();
+        showToast('应用已成功重置，请设置新的 PIN 码', 'success');
+        el.pinInput.value = '';
+        updatePinDots();
+        el.pinError.textContent = '';
+        await initSecurity();
+      } catch (err) {
+        showToast(`重置失败: ${err.message || err}`, 'error');
+      }
+    });
+  }
 
   window.addEventListener('keydown', (e) => {
     resetIdleTimer();

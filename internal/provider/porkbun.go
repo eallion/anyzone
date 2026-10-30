@@ -162,6 +162,11 @@ func (p *PorkbunProvider) ListRecords(ctx context.Context, zoneID string, zoneNa
 	return records, nil
 }
 
+// GetSupportLines Porkbun 无运营商分区线路
+func (p *PorkbunProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	return nil, nil
+}
+
 func (p *PorkbunProvider) CreateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error) {
 	name := r.Name
 	if name == "@" {

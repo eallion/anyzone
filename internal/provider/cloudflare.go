@@ -168,6 +168,11 @@ func (p *CloudflareProvider) ListRecords(ctx context.Context, zoneID string, zon
 	return records, nil
 }
 
+// GetSupportLines Cloudflare 默认使用 Anycast 广播，无运营商分区线路
+func (p *CloudflareProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	return nil, nil
+}
+
 func (p *CloudflareProvider) CreateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error) {
 	fullName := r.Name
 	if fullName == "@" {

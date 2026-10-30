@@ -154,3 +154,14 @@ func (s *Store) DeleteAccount(id string) error {
 	s.data.Accounts = filtered
 	return s.save()
 }
+
+// Reset 清空全部数据与设置，恢复到初始未设置 PIN 状态
+func (s *Store) Reset() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.data = StoreData{
+		Settings: config.DefaultSettings(),
+		Accounts: make([]config.Account, 0),
+	}
+	return s.save()
+}

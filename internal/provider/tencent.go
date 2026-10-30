@@ -330,16 +330,81 @@ func (p *TencentCloudProvider) ListZones(ctx context.Context) ([]Zone, error) {
 type tcRecordListResp struct {
 	Response struct {
 		RecordList []struct {
-			RecordId any    `json:"RecordId"`
-			Name     string `json:"Name"`
-			Type     string `json:"Type"`
-			Value    string `json:"Value"`
-			TTL      any    `json:"TTL"`
-			MX       any    `json:"MX"`
-			Remark   string `json:"Remark"`
-			Status   string `json:"Status"`
+			RecordId   any    `json:"RecordId"`
+			Name       string `json:"Name"`
+			Type       string `json:"Type"`
+			Value      string `json:"Value"`
+			TTL        any    `json:"TTL"`
+			MX         any    `json:"MX"`
+			Remark     string `json:"Remark"`
+			Status     string `json:"Status"`
+			RecordLine string `json:"RecordLine"`
+			LineId     string `json:"LineId"`
 		} `json:"RecordList"`
 	} `json:"Response"`
+}
+
+// GetSupportLines 获取指定域名在当前套餐权限下支持的全部解析线路列表
+func (p *TencentCloudProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	if strings.HasPrefix(zoneID, "zone-") {
+		return nil, nil
+	}
+
+	// 1. 先探测当前域名的套餐等级 Grade (DP_FREE / DP_PLUS / DP_EXTRA / DP_EXPERT / DP_ULTRA)
+	domainPayload := map[string]interface{}{
+		"Domain": zoneName,
+	}
+	if did, err := strconv.ParseUint(zoneID, 10, 64); err == nil && did > 0 {
+		domainPayload["DomainId"] = did
+	}
+	domainBody, err := p.doRequest(ctx, "dnspod", "2021-03-23", "DescribeDomain", domainPayload)
+	grade := "DP_FREE"
+	if err == nil {
+		var dResp struct {
+			Response struct {
+				DomainInfo struct {
+					Grade string `json:"Grade"`
+				} `json:"DomainInfo"`
+			} `json:"Response"`
+		}
+		if jsonErr := json.Unmarshal(domainBody, &dResp); jsonErr == nil && dResp.Response.DomainInfo.Grade != "" {
+			grade = dResp.Response.DomainInfo.Grade
+		}
+	}
+
+	// 2. 根据域名的套餐等级，拉取其权限范围内的全部可用解析线路列表
+	linePayload := map[string]interface{}{
+		"Domain":      zoneName,
+		"DomainGrade": grade,
+	}
+	if did, err := strconv.ParseUint(zoneID, 10, 64); err == nil && did > 0 {
+		linePayload["DomainId"] = did
+	}
+	lineBody, err := p.doRequest(ctx, "dnspod", "2021-03-23", "DescribeRecordLineList", linePayload)
+	if err != nil {
+		return nil, err
+	}
+
+	var lResp struct {
+		Response struct {
+			LineList []struct {
+				LineId string `json:"LineId"`
+				Name   string `json:"Name"`
+			} `json:"LineList"`
+		} `json:"Response"`
+	}
+	if err := json.Unmarshal(lineBody, &lResp); err != nil {
+		return nil, err
+	}
+
+	lines := make([]LineInfo, len(lResp.Response.LineList))
+	for i, l := range lResp.Response.LineList {
+		lines[i] = LineInfo{
+			ID:   l.Name,
+			Name: l.Name,
+		}
+	}
+	return lines, nil
 }
 
 type tcTEORecordListResp struct {
@@ -459,6 +524,11 @@ func (p *TencentCloudProvider) ListRecords(ctx context.Context, zoneID string, z
 		ttlInt, _ := strconv.Atoi(fmt.Sprintf("%v", r.TTL))
 		mxInt, _ := strconv.Atoi(fmt.Sprintf("%v", r.MX))
 
+		line := r.RecordLine
+		if line == "" {
+			line = "默认"
+		}
+
 		records[i] = Record{
 			ID:       fmt.Sprintf("%v", r.RecordId),
 			ZoneID:   zoneID,
@@ -469,6 +539,8 @@ func (p *TencentCloudProvider) ListRecords(ctx context.Context, zoneID string, z
 			TTL:      ttlInt,
 			Priority: mxInt,
 			Comment:  r.Remark,
+			Line:     line,
+			LineName: line,
 		}
 	}
 
@@ -506,11 +578,16 @@ func (p *TencentCloudProvider) CreateRecord(ctx context.Context, zoneID string, 
 		return &r, nil
 	}
 
+	line := r.Line
+	if line == "" {
+		line = "默认"
+	}
+
 	payload := map[string]interface{}{
 		"Domain":     zoneName,
 		"SubDomain":  r.Name,
 		"RecordType": r.Type,
-		"RecordLine": "默认",
+		"RecordLine": line,
 		"Value":      r.Content,
 	}
 	if r.TTL > 0 {
@@ -540,6 +617,8 @@ func (p *TencentCloudProvider) CreateRecord(ctx context.Context, zoneID string, 
 	r.ID = fmt.Sprintf("%v", resp.Response.RecordId)
 	r.ZoneID = zoneID
 	r.ZoneName = zoneName
+	r.Line = line
+	r.LineName = line
 	return &r, nil
 }
 
@@ -566,13 +645,18 @@ func (p *TencentCloudProvider) UpdateRecord(ctx context.Context, zoneID string, 
 		return &r, nil
 	}
 
+	line := r.Line
+	if line == "" {
+		line = "默认"
+	}
+
 	recIDInt, _ := strconv.ParseUint(r.ID, 10, 64)
 	payload := map[string]interface{}{
 		"Domain":     zoneName,
 		"RecordId":   recIDInt,
 		"SubDomain":  r.Name,
 		"RecordType": r.Type,
-		"RecordLine": "默认",
+		"RecordLine": line,
 		"Value":      r.Content,
 	}
 	if r.TTL > 0 {
@@ -590,6 +674,8 @@ func (p *TencentCloudProvider) UpdateRecord(ctx context.Context, zoneID string, 
 		return nil, err
 	}
 
+	r.Line = line
+	r.LineName = line
 	return &r, nil
 }
 

@@ -123,14 +123,43 @@ func (p *DNSPodProvider) ListZones(ctx context.Context) ([]Zone, error) {
 
 type dpRecordListResp struct {
 	Records []struct {
-		ID      string `json:"id"`
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Value   string `json:"value"`
-		TTL     any    `json:"ttl"`
-		MX      any    `json:"mx"`
-		Remark  string `json:"remark"`
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		Type       string `json:"type"`
+		Value      string `json:"value"`
+		TTL        any    `json:"ttl"`
+		MX         any    `json:"mx"`
+		Remark     string `json:"remark"`
+		Line       string `json:"line"`
+		RecordLine string `json:"record_line"`
 	} `json:"records"`
+}
+
+// GetSupportLines 获取指定域名在当前套餐权限下支持的全部解析线路列表
+func (p *DNSPodProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	form := url.Values{}
+	form.Set("domain_id", zoneID)
+
+	body, err := p.doRequest(ctx, "Record.Line", form)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Lines []string `json:"lines"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, err
+	}
+
+	lines := make([]LineInfo, len(resp.Lines))
+	for i, l := range resp.Lines {
+		lines[i] = LineInfo{
+			ID:   l,
+			Name: l,
+		}
+	}
+	return lines, nil
 }
 
 func (p *DNSPodProvider) ListRecords(ctx context.Context, zoneID string, zoneName string) ([]Record, error) {
@@ -153,6 +182,14 @@ func (p *DNSPodProvider) ListRecords(ctx context.Context, zoneID string, zoneNam
 		ttlInt, _ := strconv.Atoi(fmt.Sprintf("%v", r.TTL))
 		mxInt, _ := strconv.Atoi(fmt.Sprintf("%v", r.MX))
 
+		line := r.Line
+		if line == "" {
+			line = r.RecordLine
+		}
+		if line == "" {
+			line = "默认"
+		}
+
 		records[i] = Record{
 			ID:       r.ID,
 			ZoneID:   zoneID,
@@ -163,17 +200,24 @@ func (p *DNSPodProvider) ListRecords(ctx context.Context, zoneID string, zoneNam
 			TTL:      ttlInt,
 			Priority: mxInt,
 			Comment:  r.Remark,
+			Line:     line,
+			LineName: line,
 		}
 	}
 	return records, nil
 }
 
 func (p *DNSPodProvider) CreateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error) {
+	line := r.Line
+	if line == "" {
+		line = "默认"
+	}
+
 	form := url.Values{}
 	form.Set("domain_id", zoneID)
 	form.Set("sub_domain", r.Name)
 	form.Set("record_type", r.Type)
-	form.Set("record_line", "默认")
+	form.Set("record_line", line)
 	form.Set("value", r.Content)
 	if r.TTL > 0 {
 		form.Set("ttl", strconv.Itoa(r.TTL))
@@ -199,16 +243,23 @@ func (p *DNSPodProvider) CreateRecord(ctx context.Context, zoneID string, zoneNa
 	r.ID = fmt.Sprintf("%v", resp.Record.ID)
 	r.ZoneID = zoneID
 	r.ZoneName = zoneName
+	r.Line = line
+	r.LineName = line
 	return &r, nil
 }
 
 func (p *DNSPodProvider) UpdateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error) {
+	line := r.Line
+	if line == "" {
+		line = "默认"
+	}
+
 	form := url.Values{}
 	form.Set("domain_id", zoneID)
 	form.Set("record_id", r.ID)
 	form.Set("sub_domain", r.Name)
 	form.Set("record_type", r.Type)
-	form.Set("record_line", "默认")
+	form.Set("record_line", line)
 	form.Set("value", r.Content)
 	if r.TTL > 0 {
 		form.Set("ttl", strconv.Itoa(r.TTL))
@@ -222,6 +273,8 @@ func (p *DNSPodProvider) UpdateRecord(ctx context.Context, zoneID string, zoneNa
 		return nil, err
 	}
 
+	r.Line = line
+	r.LineName = line
 	return &r, nil
 }
 

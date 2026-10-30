@@ -100,6 +100,13 @@ func (p *HuaweiProvider) ListZones(ctx context.Context) ([]Zone, error) {
 	return zones, nil
 }
 
+// GetSupportLines 华为云支持的线路列表
+func (p *HuaweiProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	return []LineInfo{
+		{ID: "DEFAULT_LINE", Name: "默认线路"},
+	}, nil
+}
+
 type hwRecordResp struct {
 	Recordsets []struct {
 		ID          string   `json:"id"`

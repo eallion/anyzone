@@ -16,6 +16,14 @@ type Record struct {
 	Priority  int    `json:"priority,omitempty"` // MX 或 SRV 优先级
 	Proxied   *bool  `json:"proxied,omitempty"`  // Cloudflare 专属 CDN 加速开关
 	Comment   string `json:"comment,omitempty"`  // 备注说明
+	Line      string `json:"line,omitempty"`     // 运营商解析线路代码/标识 (如 default, telecom, 0, 10=0)
+	LineName  string `json:"line_name,omitempty"`// 运营商解析线路友好中文名称 (如 默认, 中国电信, 境外)
+}
+
+// LineInfo 代表运营商支持的一个解析线路/分区
+type LineInfo struct {
+	ID   string `json:"id"`   // 线路代号或 ID (如 default, telecom, 0, 10=0)
+	Name string `json:"name"` // 线路友好中文名称 (如 默认, 中国电信, 境外)
 }
 
 // Zone 代表一个主域名空间
@@ -43,6 +51,9 @@ type DNSProvider interface {
 
 	// ListRecords 获取指定域名下的全部解析记录
 	ListRecords(ctx context.Context, zoneID string, zoneName string) ([]Record, error)
+
+	// GetSupportLines 获取指定域名在当前套餐权限下支持的全部解析线路列表
+	GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error)
 
 	// CreateRecord 创建解析记录
 	CreateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error)

@@ -294,18 +294,86 @@ func (p *AliyunProvider) ListZones(ctx context.Context) ([]Zone, error) {
 	return zones, nil
 }
 
+func mapAliyunLineName(code string) string {
+	switch strings.ToLower(code) {
+	case "default":
+		return "默认"
+	case "telecom":
+		return "中国电信"
+	case "unicom":
+		return "中国联通"
+	case "mobile":
+		return "中国移动"
+	case "oversea":
+		return "境外"
+	case "edu":
+		return "中国教育网"
+	case "drpeng":
+		return "鹏博士"
+	case "btvn":
+		return "广电网"
+	default:
+		return code
+	}
+}
+
 type aliyunRecordListResp struct {
 	DomainRecords struct {
 		Record []struct {
-			RecordId string `json:"RecordId"`
-			RR       string `json:"RR"`
-			Type     string `json:"Type"`
-			Value    string `json:"Value"`
-			TTL      int    `json:"TTL"`
-			Priority int    `json:"Priority"`
-			Remark   string `json:"Remark"`
+			RecordId        string `json:"RecordId"`
+			RR              string `json:"RR"`
+			Type            string `json:"Type"`
+			Value           string `json:"Value"`
+			TTL             int    `json:"TTL"`
+			Priority        int    `json:"Priority"`
+			Remark          string `json:"Remark"`
+			Line            string `json:"Line"`
+			LineDisplayName string `json:"LineDisplayName"`
 		} `json:"Record"`
 	} `json:"DomainRecords"`
+}
+
+// GetSupportLines 获取指定域名在当前套餐权限下支持的全部解析线路列表
+func (p *AliyunProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	if p.providerType == "aliyun_esa" || strings.HasPrefix(zoneID, "esa:") {
+		return nil, nil
+	}
+
+	raw, err := p.doRequest(ctx, "DescribeSupportLines", map[string]string{
+		"DomainName": zoneName,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		RecordLines struct {
+			RecordLine []struct {
+				LineCode        string `json:"LineCode"`
+				LineName        string `json:"LineName"`
+				LineDisplayName string `json:"LineDisplayName"`
+			} `json:"RecordLine"`
+		} `json:"RecordLines"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, err
+	}
+
+	lines := make([]LineInfo, 0, len(resp.RecordLines.RecordLine))
+	for _, l := range resp.RecordLines.RecordLine {
+		name := l.LineDisplayName
+		if name == "" {
+			name = l.LineName
+		}
+		if name == "" {
+			name = mapAliyunLineName(l.LineCode)
+		}
+		lines = append(lines, LineInfo{
+			ID:   l.LineCode,
+			Name: name,
+		})
+	}
+	return lines, nil
 }
 
 func (p *AliyunProvider) ListRecords(ctx context.Context, zoneID string, zoneName string) ([]Record, error) {
@@ -390,6 +458,15 @@ func (p *AliyunProvider) ListRecords(ctx context.Context, zoneID string, zoneNam
 	list := parsed.DomainRecords.Record
 	records := make([]Record, len(list))
 	for i, r := range list {
+		lineCode := r.Line
+		if lineCode == "" {
+			lineCode = "default"
+		}
+		lineName := r.LineDisplayName
+		if lineName == "" {
+			lineName = mapAliyunLineName(lineCode)
+		}
+
 		records[i] = Record{
 			ID:       r.RecordId,
 			ZoneID:   zoneName,
@@ -400,6 +477,8 @@ func (p *AliyunProvider) ListRecords(ctx context.Context, zoneID string, zoneNam
 			TTL:      r.TTL,
 			Priority: r.Priority,
 			Comment:  r.Remark,
+			Line:     lineCode,
+			LineName: lineName,
 		}
 	}
 	return records, nil
@@ -439,15 +518,24 @@ func (p *AliyunProvider) CreateRecord(ctx context.Context, zoneID string, zoneNa
 		}, nil
 	}
 
+	line := r.Line
+	if line == "" {
+		line = "default"
+	}
+
 	params := map[string]string{
 		"DomainName": zoneName,
 		"RR":         r.Name,
 		"Type":       r.Type,
 		"Value":      r.Content,
 		"TTL":        strconv.Itoa(r.TTL),
+		"Line":       line,
 	}
 	if r.Priority > 0 {
 		params["Priority"] = strconv.Itoa(r.Priority)
+	}
+	if r.Comment != "" {
+		params["Remark"] = r.Comment
 	}
 
 	raw, err := p.doRequest(ctx, "AddDomainRecord", params)
@@ -471,6 +559,9 @@ func (p *AliyunProvider) CreateRecord(ctx context.Context, zoneID string, zoneNa
 		Content:  r.Content,
 		TTL:      r.TTL,
 		Priority: r.Priority,
+		Comment:  r.Comment,
+		Line:     line,
+		LineName: mapAliyunLineName(line),
 	}, nil
 }
 
@@ -493,15 +584,24 @@ func (p *AliyunProvider) UpdateRecord(ctx context.Context, zoneID string, zoneNa
 		return &r, nil
 	}
 
+	line := r.Line
+	if line == "" {
+		line = "default"
+	}
+
 	params := map[string]string{
 		"RecordId": r.ID,
 		"RR":       r.Name,
 		"Type":     r.Type,
 		"Value":    r.Content,
 		"TTL":      strconv.Itoa(r.TTL),
+		"Line":     line,
 	}
 	if r.Priority > 0 {
 		params["Priority"] = strconv.Itoa(r.Priority)
+	}
+	if r.Comment != "" {
+		params["Remark"] = r.Comment
 	}
 
 	_, err := p.doRequest(ctx, "UpdateDomainRecord", params)
@@ -509,6 +609,9 @@ func (p *AliyunProvider) UpdateRecord(ctx context.Context, zoneID string, zoneNa
 		return nil, err
 	}
 
+	if r.LineName == "" {
+		r.LineName = mapAliyunLineName(line)
+	}
 	return &r, nil
 }
 

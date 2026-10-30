@@ -594,6 +594,30 @@ func (a *App) DeleteRecord(accountID, zoneID, zoneName, recordID string) error {
 	return p.DeleteRecord(ctx, zoneID, zoneName, recordID)
 }
 
+// ResetApp 清除所有本地数据与 PIN 码设置，将软件恢复到初次使用状态
+func (a *App) ResetApp() error {
+	a.mu.Lock()
+	a.sessionKey = nil
+	a.lastActive = time.Time{}
+	a.mu.Unlock()
+
+	return a.store.Reset()
+}
+
+// GetZoneLines 获取指定域名在对应云厂商套餐下所支持的全部解析线路列表
+func (a *App) GetZoneLines(accountID, zoneID, zoneName string) ([]provider.LineInfo, error) {
+	a.touchActivity()
+	p, err := a.getProviderForAccount(accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	return p.GetSupportLines(ctx, zoneID, zoneName)
+}
+
 // GetAppVersion 返回当前运行的应用编译版本号
 func (a *App) GetAppVersion() string {
 	return AppVersion

@@ -152,6 +152,11 @@ func (p *PowerDNSProvider) ListRecords(ctx context.Context, zoneID string, zoneN
 	return records, nil
 }
 
+// GetSupportLines PowerDNS 无运营商分区线路
+func (p *PowerDNSProvider) GetSupportLines(ctx context.Context, zoneID string, zoneName string) ([]LineInfo, error) {
+	return nil, nil
+}
+
 func (p *PowerDNSProvider) CreateRecord(ctx context.Context, zoneID string, zoneName string, r Record) (*Record, error) {
 	fullRecordName := r.Name
 	if fullRecordName == "@" {
