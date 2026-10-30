@@ -3,6 +3,31 @@
    Frontend Application Controller
    ========================================================================== */
 
+// 本地排序缓存读取辅助函数
+function getStoredSort(key, defaultVal) {
+  try {
+    return localStorage.getItem(key) || defaultVal;
+  } catch (e) {
+    return defaultVal;
+  }
+}
+
+// 侧边栏排序模式定义
+const ACCOUNT_SORT_MODES = [
+  { key: 'default', label: '默认' },
+  { key: 'name-asc', label: 'A-Z' },
+  { key: 'name-desc', label: 'Z-A' },
+  { key: 'provider', label: '厂商' },
+];
+
+const ZONE_SORT_MODES = [
+  { key: 'name-asc', label: 'A-Z' },
+  { key: 'name-desc', label: 'Z-A' },
+  { key: 'status', label: '状态' },
+  { key: 'provider', label: '厂商' },
+  { key: 'default', label: '默认' },
+];
+
 // 状态管理
 const state = {
   isUnlocked: false,
@@ -11,9 +36,11 @@ const state = {
   accounts: [],
   selectedAccount: null,
   isAllAccountsMode: true, // 默认开启全选所有厂商聚合模式
+  accountSort: getStoredSort('anyzone_account_sort', 'default'),
   zones: [],
   selectedZone: null,
   zoneFilter: 'all', // 'all', 'active', 'mismatch', 'hidden'
+  zoneSort: getStoredSort('anyzone_zone_sort', 'name-asc'),
   expandAllZones: false, // 是否临时展开超出设置限制的域名
   nsCache: {}, // 域名公网权威 NS 缓存，严格以 account_id:domain 为唯一键隔离
   records: [],
@@ -139,6 +166,10 @@ const el = {
   accountsList: document.getElementById('accounts-list'),
   zonesList: document.getElementById('zones-list'),
   btnAddAccountModal: document.getElementById('btn-add-account-modal'),
+  btnSortAccounts: document.getElementById('btn-sort-accounts'),
+  sortAccText: document.getElementById('sort-acc-text'),
+  btnSortZones: document.getElementById('btn-sort-zones'),
+  sortZoneText: document.getElementById('sort-zone-text'),
   btnRefreshZones: document.getElementById('btn-refresh-zones'),
   btnCheckNS: document.getElementById('btn-check-ns'),
   hiddenCountBadge: document.getElementById('hidden-count-badge'),
@@ -586,6 +617,53 @@ function hideAccountContextMenu() {
   }
 }
 
+// 侧边栏排序切换与 UI 同步逻辑
+function getNextSortMode(modes, currentKey) {
+  const idx = modes.findIndex(m => m.key === currentKey);
+  const nextIdx = (idx + 1) % modes.length;
+  return modes[nextIdx].key;
+}
+
+function updateSortButtonsUI() {
+  const accMode = ACCOUNT_SORT_MODES.find(m => m.key === state.accountSort) || ACCOUNT_SORT_MODES[0];
+  if (el.sortAccText) {
+    el.sortAccText.textContent = accMode.label;
+  }
+  if (el.btnSortAccounts) {
+    el.btnSortAccounts.title = `当前账号排序：${accMode.label} (点击切换：默认 / A-Z / Z-A / 厂商)`;
+  }
+
+  const zoneMode = ZONE_SORT_MODES.find(m => m.key === state.zoneSort) || ZONE_SORT_MODES[0];
+  if (el.sortZoneText) {
+    el.sortZoneText.textContent = zoneMode.label;
+  }
+  if (el.btnSortZones) {
+    el.btnSortZones.title = `当前域名排序：${zoneMode.label} (点击切换：A-Z / Z-A / 状态 / 厂商 / 默认)`;
+  }
+}
+
+function toggleAccountSort() {
+  state.accountSort = getNextSortMode(ACCOUNT_SORT_MODES, state.accountSort);
+  try {
+    localStorage.setItem('anyzone_account_sort', state.accountSort);
+  } catch (e) {}
+  updateSortButtonsUI();
+  renderAccounts();
+  const currentMode = ACCOUNT_SORT_MODES.find(m => m.key === state.accountSort);
+  showToast(`账号排序已切换为：${currentMode.label}`, 'info');
+}
+
+function toggleZoneSort() {
+  state.zoneSort = getNextSortMode(ZONE_SORT_MODES, state.zoneSort);
+  try {
+    localStorage.setItem('anyzone_zone_sort', state.zoneSort);
+  } catch (e) {}
+  updateSortButtonsUI();
+  renderZones(false);
+  const currentMode = ZONE_SORT_MODES.find(m => m.key === state.zoneSort);
+  showToast(`域名排序已切换为：${currentMode.label}`, 'info');
+}
+
 function renderAccounts() {
   el.accountsList.innerHTML = '';
   if (state.accounts.length === 0) {
@@ -594,7 +672,7 @@ function renderAccounts() {
     return;
   }
 
-  // 1. 顶部渲染“全部厂商”聚合入口
+  // 1. 顶部渲染“全部厂商”聚合入口 (保持在最上方)
   const allItem = document.createElement('div');
   allItem.className = `nav-item all-accounts ${state.isAllAccountsMode ? 'active' : ''}`;
   allItem.innerHTML = `
@@ -607,8 +685,24 @@ function renderAccounts() {
   allItem.addEventListener('click', () => selectAllAccounts());
   el.accountsList.appendChild(allItem);
 
-  // 2. 依次渲染各个账号
-  state.accounts.forEach(acc => {
+  // 2. 依据当前排序规则对账号进行浅拷贝排序
+  let sortedAccounts = [...state.accounts];
+  if (state.accountSort === 'name-asc') {
+    sortedAccounts.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'zh-CN', { numeric: true }));
+  } else if (state.accountSort === 'name-desc') {
+    sortedAccounts.sort((a, b) => (b.name || '').localeCompare(a.name || '', 'zh-CN', { numeric: true }));
+  } else if (state.accountSort === 'provider') {
+    sortedAccounts.sort((a, b) => {
+      const p1 = PROVIDER_NAMES[a.provider] || a.provider || '';
+      const p2 = PROVIDER_NAMES[b.provider] || b.provider || '';
+      const comp = p1.localeCompare(p2, 'zh-CN');
+      if (comp !== 0) return comp;
+      return (a.name || '').localeCompare(b.name || '', 'zh-CN', { numeric: true });
+    });
+  }
+
+  // 3. 依次渲染各个账号
+  sortedAccounts.forEach(acc => {
     const item = document.createElement('div');
     const isSingleActive = !state.isAllAccountsMode && state.selectedAccount?.id === acc.id;
     item.className = `nav-item ${isSingleActive ? 'active' : ''}`;
@@ -794,6 +888,7 @@ function renderZones(resetSelection = true) {
   });
   if (el.hiddenCountBadge) {
     el.hiddenCountBadge.textContent = hiddenCount;
+    el.hiddenCountBadge.style.display = hiddenCount > 0 ? 'inline-block' : 'none';
   }
 
   // 过滤展示列表
@@ -823,6 +918,35 @@ function renderZones(resetSelection = true) {
     return true;
   });
 
+  // 依据当前排序规则对域名进行排序
+  if (state.zoneSort === 'name-asc') {
+    filtered.sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
+  } else if (state.zoneSort === 'name-desc') {
+    filtered.sort((a, b) => (b.name || '').localeCompare(a.name || '', undefined, { numeric: true }));
+  } else if (state.zoneSort === 'status') {
+    const getStatusScore = (z) => {
+      const key = getZoneKey(z);
+      const nsInfo = state.nsCache[key];
+      if (!nsInfo) return 1;
+      if (nsInfo.status === 'matched') return 0;
+      if (nsInfo.status === 'mismatched') return 2;
+      return 1;
+    };
+    filtered.sort((a, b) => {
+      const diff = getStatusScore(a) - getStatusScore(b);
+      if (diff !== 0) return diff;
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
+    });
+  } else if (state.zoneSort === 'provider') {
+    filtered.sort((a, b) => {
+      const p1 = (a.provider || '') + ':' + (a.account_name || '');
+      const p2 = (b.provider || '') + ':' + (b.account_name || '');
+      const comp = p1.localeCompare(p2);
+      if (comp !== 0) return comp;
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
+    });
+  }
+
   // 分页展示控制
   const limitSetting = parseInt(state.settings.zone_page_size, 10);
   const hasLimit = limitSetting > 0 && !state.expandAllZones;
@@ -839,7 +963,7 @@ function renderZones(resetSelection = true) {
     } else if (filter === 'active') {
       emptyMsg = '暂无权威 NS 正常生效的域名';
       if (mismatchCount > 0) {
-        actionBtnHtml = `<div style="margin-top: 10px;"><button class="btn btn-secondary btn-sm" onclick="switchZoneFilter('all')">查看全部域名 (含 ${mismatchCount} 个未生效)</button></div>`;
+        actionBtnHtml = `<div style="margin-top: 10px;"><button class="btn btn-secondary btn-sm" onclick="switchZoneFilter('all')">查看全部 (含 ${mismatchCount} 个未生效)</button></div>`;
       }
     } else if (hiddenCount > 0) {
       emptyMsg = `该账号下有 ${hiddenCount} 个域名已被手动隐藏`;
@@ -944,7 +1068,7 @@ function renderZones(resetSelection = true) {
   if (hasLimit && filtered.length > renderLimit) {
     const moreBtn = document.createElement('div');
     moreBtn.className = 'zones-load-more';
-    moreBtn.textContent = `展开更多域名 (已显示 ${renderLimit} / 共 ${filtered.length} 个)`;
+    moreBtn.textContent = `加载更多 (${renderLimit} / ${filtered.length})`;
     moreBtn.addEventListener('click', () => {
       state.expandAllZones = true;
       renderZones(false);
@@ -1899,6 +2023,15 @@ function bindEvents() {
       showToast('权威 NS 检测已完成', 'success');
     });
   }
+
+  // 账号与域名排序按钮事件绑定
+  if (el.btnSortAccounts) {
+    el.btnSortAccounts.addEventListener('click', toggleAccountSort);
+  }
+  if (el.btnSortZones) {
+    el.btnSortZones.addEventListener('click', toggleZoneSort);
+  }
+  updateSortButtonsUI();
 
   // 域名筛选选项卡
   document.querySelectorAll('.filter-tab').forEach(tab => {

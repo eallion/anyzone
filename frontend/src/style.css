@@ -559,7 +559,8 @@ body {
 }
 
 .sidebar {
-  width: 260px;
+  width: 285px;
+  min-width: 285px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;
@@ -659,7 +660,7 @@ body {
 
 .zones-load-more {
   text-align: center;
-  padding: 8px 10px;
+  padding: 7px 10px;
   font-size: 11px;
   color: var(--color-primary);
   background: var(--bg-tertiary);
@@ -667,6 +668,9 @@ body {
   border-radius: var(--radius-sm);
   cursor: pointer;
   margin-top: 6px;
+  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: all 0.15s ease;
 }
 
@@ -681,6 +685,8 @@ body {
   justify-content: space-between;
   margin-bottom: 8px;
   padding: 0 4px;
+  gap: 6px;
+  flex-wrap: nowrap;
 }
 
 .section-header h3 {
@@ -689,6 +695,8 @@ body {
   letter-spacing: 0.5px;
   color: var(--text-muted);
   font-weight: 700;
+  white-space: nowrap !important;
+  flex-shrink: 0;
 }
 
 .btn-text-action {
@@ -700,10 +708,14 @@ body {
   font-weight: 500;
   white-space: nowrap !important;
   flex-shrink: 0;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
 }
 
 .btn-text-action:hover {
-  text-decoration: underline;
+  background: var(--bg-tertiary);
+  text-decoration: none;
 }
 
 /* Account List & Zone List */
@@ -843,7 +855,9 @@ body {
 .header-action-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .zones-filter-bar {
@@ -854,10 +868,12 @@ body {
   padding: 2px;
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
+  flex-wrap: nowrap;
 }
 
 .filter-tab {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: none;
   font-size: 11px;
@@ -866,12 +882,13 @@ body {
   border-radius: 4px;
   cursor: pointer;
   text-align: center;
-  white-space: nowrap;
+  white-space: nowrap !important;
+  flex-shrink: 0;
   transition: all 0.15s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
 }
 
 .filter-tab:hover {
@@ -891,6 +908,8 @@ body {
   padding: 0 4px;
   border-radius: 6px;
   font-weight: normal;
+  white-space: nowrap !important;
+  flex-shrink: 0;
 }
 
 /* 域名项精美布局 */
@@ -924,6 +943,7 @@ body {
   align-items: center;
   justify-content: space-between;
   width: 100%;
+  gap: 6px;
 }
 
 .zone-item-name {
@@ -931,7 +951,8 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 180px;
+  flex: 1;
+  min-width: 0;
 }
 
 .zone-item-actions {
@@ -940,6 +961,7 @@ body {
   gap: 4px;
   opacity: 0;
   transition: opacity 0.15s;
+  flex-shrink: 0;
 }
 
 .zone-item:hover .zone-item-actions {
@@ -954,6 +976,8 @@ body {
   padding: 2px 4px;
   border-radius: 3px;
   font-size: 11px;
+  white-space: nowrap !important;
+  flex-shrink: 0;
 }
 
 .btn-zone-action:hover {
@@ -1620,6 +1644,14 @@ select optgroup {
 
 .btn-secondary:hover {
   background: var(--bg-card-hover);
+}
+
+.btn-sm {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap !important;
+  flex-shrink: 0;
 }
 
 .btn-block {

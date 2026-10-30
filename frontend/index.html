@@ -88,7 +88,10 @@
         <div class="sidebar-section">
           <div class="section-header">
             <h3>云厂商账号</h3>
-            <button id="btn-add-account-modal" class="btn-text-action" title="添加新云账号">+ 新增</button>
+            <div class="header-action-group">
+              <button id="btn-sort-accounts" class="btn-text-action" title="切换账号排序：默认 / 名称 A-Z / 名称 Z-A / 厂商类型">排序: <span id="sort-acc-text">默认</span></button>
+              <button id="btn-add-account-modal" class="btn-text-action" title="添加新云账号">+ 新增</button>
+            </div>
           </div>
           <div id="accounts-list" class="accounts-nav">
             <!-- 动态渲染账号项 -->
@@ -99,6 +102,7 @@
           <div class="section-header">
             <h3>域名列表</h3>
             <div class="header-action-group">
+              <button id="btn-sort-zones" class="btn-text-action" title="切换域名排序：A-Z / Z-A / 状态优先 / 厂商聚合 / 默认">排序: <span id="sort-zone-text">A-Z</span></button>
               <button id="btn-check-ns" class="btn-text-action" title="检测全部域名的公网权威 NS 状态">检测 NS</button>
               <button id="btn-refresh-zones" class="btn-text-action" title="刷新域名列表">刷新</button>
             </div>
@@ -107,7 +111,7 @@
             <button class="filter-tab active" data-filter="all">全部</button>
             <button class="filter-tab" data-filter="active">正常</button>
             <button class="filter-tab" data-filter="mismatch" title="权威 NS 不属于当前厂商的域名">未生效</button>
-            <button class="filter-tab" data-filter="hidden" id="tab-hidden-zones" title="已被隐藏的域名">已隐藏<span id="hidden-count-badge" class="badge-mini">0</span></button>
+            <button class="filter-tab" data-filter="hidden" id="tab-hidden-zones" title="已被隐藏的域名">已隐藏<span id="hidden-count-badge" class="badge-mini" style="display: none;">0</span></button>
           </div>
           <div id="zones-list" class="zones-nav">
             <div class="empty-hint">请先选择或添加账号</div>
