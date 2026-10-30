@@ -1066,12 +1066,12 @@ function renderRecords() {
 
     tr.innerHTML = `
       <td><span class="type-badge type-${rec.type}">${rec.type}</span></td>
-      <td><span class="record-name">${escapeHtml(rec.name)}</span></td>
-      <td><span class="record-content">${escapeHtml(rec.content)}</span></td>
+      <td><span class="record-name" title="${escapeHtml(rec.name)}">${escapeHtml(rec.name)}</span></td>
+      <td><span class="record-content" title="${escapeHtml(rec.content)}">${escapeHtml(rec.content)}</span></td>
       <td>${lineBadge}</td>
       <td>${ttlDisplay}</td>
       <td>${proxiedHtml}</td>
-      <td><span style="color: var(--text-muted); font-size: 12px;">${escapeHtml(rec.comment || '-')}</span></td>
+      <td><span class="record-comment" title="${escapeHtml(rec.comment || '')}">${escapeHtml(rec.comment || '-')}</span></td>
       <td>
         <div class="table-actions">
           <button class="btn-action-sm btn-edit-record">编辑</button>
