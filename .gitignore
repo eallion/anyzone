@@ -1,0 +1,39 @@
+# Build & Packaging
+/build/bin/
+/anyzone
+/AnyZone
+/appimagetool
+/anyzone.AppDir/
+/squashfs-root/
+*.exe
+*.dll
+*.so
+*.dylib
+*.syso
+*.deb
+*.rpm
+*.AppImage
+*.tar.gz
+*.zip
+*.dmg
+*.msi
+
+# Go Test & Coverage
+*.test
+*.out
+coverage.out
+
+# Local Data & Sensitive Config
+/anyzone_data/
+anyzone.json
+anyzone.json.tmp
+anyzone.json.bak*
+.env
+.env.*
+
+# Editor & OS
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
