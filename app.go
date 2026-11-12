@@ -79,6 +79,11 @@ func (a *App) SetupPin(pin string) error {
 		return errors.New("PIN 码长度至少为 4 位")
 	}
 
+	settings := a.store.GetSettings()
+	if settings.IsPinConfigured {
+		return errors.New("PIN 码已配置，如需修改请使用修改 PIN 功能")
+	}
+
 	salt, err := security.GenerateSalt()
 	if err != nil {
 		return err
@@ -90,7 +95,6 @@ func (a *App) SetupPin(pin string) error {
 		return err
 	}
 
-	settings := a.store.GetSettings()
 	settings.IsPinConfigured = true
 	settings.PinLength = len(pin)
 	settings.PinSalt = base64.StdEncoding.EncodeToString(salt)
@@ -133,17 +137,71 @@ func (a *App) VerifyPin(pin string) error {
 	return nil
 }
 
-// ChangePin 修改 PIN 码
+// ChangePin 修改 PIN 码，同时使用新密钥重新加密所有已保存的账号凭据
 func (a *App) ChangePin(oldPin, newPin string) error {
 	if len(newPin) < 4 {
 		return errors.New("新 PIN 码长度至少为 4 位")
 	}
 
-	if err := a.VerifyPin(oldPin); err != nil {
+	settings := a.store.GetSettings()
+	if !settings.IsPinConfigured {
+		return security.ErrPINNotConfigured
+	}
+
+	oldSalt, err := base64.StdEncoding.DecodeString(settings.PinSalt)
+	if err != nil {
+		return errors.New("解析安全凭证失败")
+	}
+
+	oldKey, err := a.sec.VerifyPIN(oldPin, oldSalt, settings.PinVerifier)
+	if err != nil {
 		return fmt.Errorf("原 %w", err)
 	}
 
-	return a.SetupPin(newPin)
+	newSalt, err := security.GenerateSalt()
+	if err != nil {
+		return err
+	}
+
+	newKey := security.DeriveKey(newPin, newSalt)
+	newVerifier, err := security.GenerateVerifier(newKey)
+	if err != nil {
+		return err
+	}
+
+	accounts := a.store.ListAccounts()
+	reEncryptedAccounts := make([]config.Account, len(accounts))
+	for i, acc := range accounts {
+		reEncryptedAccounts[i] = acc
+		if acc.EncryptedCredentials == "" {
+			continue
+		}
+		plain, err := security.Decrypt(oldKey, acc.EncryptedCredentials)
+		if err != nil {
+			return fmt.Errorf("重加密账号 %q 凭据失败: %w", acc.Name, err)
+		}
+		encrypted, err := security.Encrypt(newKey, plain)
+		if err != nil {
+			return fmt.Errorf("重加密账号 %q 凭据失败: %w", acc.Name, err)
+		}
+		reEncryptedAccounts[i].EncryptedCredentials = encrypted
+	}
+
+	settings.IsPinConfigured = true
+	settings.PinLength = len(newPin)
+	settings.PinSalt = base64.StdEncoding.EncodeToString(newSalt)
+	settings.PinVerifier = newVerifier
+
+	if err := a.store.SaveAll(settings, reEncryptedAccounts); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	a.sessionKey = newKey
+	a.lastActive = time.Now()
+	a.mu.Unlock()
+
+	return nil
 }
 
 func (a *App) checkUnlockedKey() ([]byte, error) {
@@ -391,6 +449,9 @@ func (a *App) ListZones(accountID string) ([]provider.Zone, error) {
 	if err != nil {
 		return nil, err
 	}
+	if zones == nil {
+		zones = make([]provider.Zone, 0)
+	}
 
 	settings := a.store.GetSettings()
 	var accName string
@@ -428,7 +489,8 @@ func (a *App) ListAllZones() ([]provider.Zone, error) {
 	}
 
 	settings := a.store.GetSettings()
-	var allZones []provider.Zone
+	allZones := make([]provider.Zone, 0)
+	var errs []error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
@@ -444,6 +506,9 @@ func (a *App) ListAllZones() ([]provider.Zone, error) {
 
 			p, err := a.getProviderForAccount(targetAcc.ID)
 			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("[%s] %w", targetAcc.Name, err))
+				mu.Unlock()
 				return
 			}
 
@@ -452,6 +517,9 @@ func (a *App) ListAllZones() ([]provider.Zone, error) {
 
 			zones, err := p.ListZones(ctx)
 			if err != nil {
+				mu.Lock()
+				errs = append(errs, fmt.Errorf("[%s] %w", targetAcc.Name, err))
+				mu.Unlock()
 				return
 			}
 
@@ -471,6 +539,10 @@ func (a *App) ListAllZones() ([]provider.Zone, error) {
 	}
 
 	wg.Wait()
+	// 若全部账号均拉取失败且未得到任何域名，则将首个错误透传给前端提示，避免误判为空列表
+	if len(allZones) == 0 && len(errs) == len(accounts) {
+		return allZones, errs[0]
+	}
 	// 返回完整拉取的各账号全部域名，不再截断，由前端在侧边栏做丝滑高效的分页渲染
 	return allZones, nil
 }

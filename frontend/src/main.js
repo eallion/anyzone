@@ -114,31 +114,31 @@ const providerTemplates = {
 
 // Wails 接口适配器
 const backend = {
-  isPinConfigured: async () => window.go?.main?.App?.IsPinConfigured() ?? false,
+  isPinConfigured: async () => (await window.go?.main?.App?.IsPinConfigured()) ?? false,
   setupPin: async (pin) => window.go?.main?.App?.SetupPin(pin),
   verifyPin: async (pin) => window.go?.main?.App?.VerifyPin(pin),
   changePin: async (oldP, newP) => window.go?.main?.App?.ChangePin(oldP, newP),
   lock: async () => window.go?.main?.App?.Lock(),
-  getSettings: async () => window.go?.main?.App?.GetSettings() ?? {},
+  getSettings: async () => (await window.go?.main?.App?.GetSettings()) ?? {},
   saveSettings: async (s) => window.go?.main?.App?.SaveSettings(s),
-  listAccounts: async () => window.go?.main?.App?.ListAccounts() ?? [],
+  listAccounts: async () => (await window.go?.main?.App?.ListAccounts()) ?? [],
   getAccountDetail: async (accId) => window.go?.main?.App?.GetAccountDetail(accId),
   addAccount: async (name, prov, creds, proxy) => window.go?.main?.App?.AddAccount(name, prov, creds, proxy),
   updateAccount: async (id, name, prov, creds, proxy) => window.go?.main?.App?.UpdateAccount(id, name, prov, creds, proxy),
   deleteAccount: async (id) => window.go?.main?.App?.DeleteAccount(id),
   testAccount: async (prov, creds) => window.go?.main?.App?.TestAccountConnection(prov, creds),
-  listZones: async (accId) => window.go?.main?.App?.ListZones(accId) ?? [],
-  listAllZones: async () => window.go?.main?.App?.ListAllZones() ?? [],
+  listZones: async (accId) => (await window.go?.main?.App?.ListZones(accId)) ?? [],
+  listAllZones: async () => (await window.go?.main?.App?.ListAllZones()) ?? [],
   checkZoneNS: async (domain, prov) => window.go?.main?.App?.CheckZoneNS(domain, prov),
-  checkZonesNSBatch: async (items) => window.go?.main?.App?.CheckZonesNSBatch(items) ?? [],
+  checkZonesNSBatch: async (items) => (await window.go?.main?.App?.CheckZonesNSBatch(items)) ?? [],
   toggleHideZone: async (accId, zName, hide) => window.go?.main?.App?.ToggleHideZone(accId, zName, hide),
-  listRecords: async (accId, zId, zName) => window.go?.main?.App?.ListRecords(accId, zId, zName) ?? [],
+  listRecords: async (accId, zId, zName) => (await window.go?.main?.App?.ListRecords(accId, zId, zName)) ?? [],
   createRecord: async (accId, zId, zName, rec) => window.go?.main?.App?.CreateRecord(accId, zId, zName, rec),
   updateRecord: async (accId, zId, zName, rec) => window.go?.main?.App?.UpdateRecord(accId, zId, zName, rec),
   deleteRecord: async (accId, zId, zName, rId) => window.go?.main?.App?.DeleteRecord(accId, zId, zName, rId),
-  getZoneLines: async (accId, zId, zName) => window.go?.main?.App?.GetZoneLines(accId, zId, zName) ?? [],
+  getZoneLines: async (accId, zId, zName) => (await window.go?.main?.App?.GetZoneLines(accId, zId, zName)) ?? [],
   resetApp: async () => window.go?.main?.App?.ResetApp(),
-  getAppVersion: async () => window.go?.main?.App?.GetAppVersion() ?? '1.0.0',
+  getAppVersion: async () => (await window.go?.main?.App?.GetAppVersion()) ?? '1.0.0',
 };
 
 // UI 元素索引
@@ -498,6 +498,7 @@ async function handlePinSubmit() {
       await backend.setupPin(pin);
       state.isPinConfigured = true;
       state.isUnlocked = true;
+      state.settings.pin_length = pin.length;
       hidePinOverlay();
       showToast('PIN 码设置成功，AnyZone 工作台已就绪', 'success');
       loadApp();
@@ -579,7 +580,8 @@ function updateProxyIndicatorUI() {
 
 async function loadAccounts() {
   try {
-    state.accounts = await backend.listAccounts();
+    const accounts = await backend.listAccounts();
+    state.accounts = Array.isArray(accounts) ? accounts : [];
     renderAccounts();
 
     // 默认行为：全选所有厂商聚合模式
@@ -795,11 +797,13 @@ async function loadZones(accountId) {
   el.zonesList.innerHTML = `<div class="empty-hint">${loadingText}</div>`;
 
   try {
+    let zones;
     if (accountId === null) {
-      state.zones = await backend.listAllZones();
+      zones = await backend.listAllZones();
     } else {
-      state.zones = await backend.listZones(accountId);
+      zones = await backend.listZones(accountId);
     }
+    state.zones = Array.isArray(zones) ? zones : [];
 
     // 预填后端已确认的权威 NS 状态（如 EdgeOne / ESA 官方 active 站点），避免闪烁
     state.zones.forEach(z => {
@@ -821,6 +825,7 @@ async function loadZones(accountId) {
     // 后台静默并发探测权威 NS
     triggerBatchNSCheck(state.zones);
   } catch (err) {
+    state.zones = [];
     el.zonesList.innerHTML = `<div class="empty-hint" style="color: var(--color-danger)">同步失败: ${err.message || err}</div>`;
     showToast(`获取域名列表失败: ${err}`, 'error');
   }
@@ -1757,6 +1762,7 @@ document.getElementById('btn-execute-change-pin').addEventListener('click', asyn
   }
   try {
     await backend.changePin(oldPin, newPin);
+    state.settings.pin_length = newPin.length;
     showToast('安全 PIN 码修改成功', 'success');
     document.getElementById('old-pin').value = '';
     document.getElementById('new-pin').value = '';

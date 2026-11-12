@@ -26,6 +26,11 @@ func NewStore() (*Store, error) {
 		return nil, err
 	}
 
+	return NewStoreAt(configPath)
+}
+
+// NewStoreAt 在指定配置文件路径初始化数据仓库
+func NewStoreAt(configPath string) (*Store, error) {
 	s := &Store{
 		filePath: configPath,
 		data: StoreData{
@@ -99,7 +104,11 @@ func (s *Store) save() error {
 		return err
 	}
 
-	return os.WriteFile(s.filePath, raw, 0600)
+	tmpPath := s.filePath + ".tmp"
+	if err := os.WriteFile(tmpPath, raw, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, s.filePath)
 }
 
 func (s *Store) GetSettings() config.Settings {
@@ -113,6 +122,25 @@ func (s *Store) SaveSettings(settings config.Settings) error {
 	defer s.mu.Unlock()
 	s.data.Settings = settings
 	return s.save()
+}
+
+// SaveAll 原子更新全局设置与账号列表，避免密钥更新与密文落盘不一致
+func (s *Store) SaveAll(settings config.Settings, accounts []config.Account) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	oldData := s.data
+	updatedAccounts := make([]config.Account, len(accounts))
+	copy(updatedAccounts, accounts)
+	s.data = StoreData{
+		Settings: settings,
+		Accounts: updatedAccounts,
+	}
+	if err := s.save(); err != nil {
+		s.data = oldData
+		return err
+	}
+	return nil
 }
 
 func (s *Store) ListAccounts() []config.Account {
