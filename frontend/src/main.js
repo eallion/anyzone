@@ -1485,6 +1485,7 @@ function openAddAccountModal() {
   document.getElementById('form-srv-url').value = '';
   document.getElementById('form-srv-key').value = '';
 
+  el.accProviderSelect.value = 'cloudflare';
   syncCustomSelect(el.accProviderSelect);
   updateProviderFormDisplay();
   el.modalAccount.classList.add('active');
@@ -2003,6 +2004,9 @@ function bindEvents() {
   document.getElementById('btn-close-account-modal').addEventListener('click', () => el.modalAccount.classList.remove('active'));
   document.getElementById('btn-test-account').addEventListener('click', handleTestAccount);
   document.getElementById('btn-save-account').addEventListener('click', handleSaveAccount);
+  if (el.accProviderSelect) {
+    el.accProviderSelect.addEventListener('change', updateProviderFormDisplay);
+  }
 
   // DNSPod 二级认证方式切换单选监听
   document.querySelectorAll('input[name="dnspod-auth-mode"]').forEach(r => {
