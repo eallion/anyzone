@@ -539,6 +539,10 @@ async function lockApp() {
   await backend.lock();
   state.isUnlocked = false;
   state.pinMode = 'unlock';
+  if (el.modalAccount) el.modalAccount.classList.remove('active');
+  if (el.modalRecord) el.modalRecord.classList.remove('active');
+  if (el.modalSettings) el.modalSettings.classList.remove('active');
+  hideAccountContextMenu();
   el.pinTitle.textContent = '安全验证';
   el.pinSubtitle.textContent = '请输入安全 PIN 码解锁';
   el.btnSubmitPin.textContent = '解锁';
@@ -584,16 +588,54 @@ async function loadAccounts() {
     state.accounts = Array.isArray(accounts) ? accounts : [];
     renderAccounts();
 
+    if (state.accounts.length === 0) {
+      state.selectedAccount = null;
+      state.selectedZone = null;
+      renderZones();
+      return;
+    }
+
+    // 若当前为单账号模式且原选中账号仍存在，则保留原选中账号
+    if (!state.isAllAccountsMode && state.selectedAccount) {
+      const existing = state.accounts.find(a => a.id === state.selectedAccount.id);
+      if (existing) {
+        await selectAccount(existing);
+        return;
+      }
+    }
+
     // 默认行为：全选所有厂商聚合模式
     const defaultAll = state.settings.aggregate_all_default !== false;
-    if (defaultAll && state.accounts.length > 0) {
+    if (defaultAll) {
       await selectAllAccounts();
-    } else if (state.accounts.length > 0) {
+    } else {
       await selectAccount(state.accounts[0]);
     }
   } catch (err) {
     showToast(`获取账号列表失败: ${err}`, 'error');
   }
+}
+
+// 获取当前处于活跃操作状态的云厂商账号对象（优先 selectedAccount，缺失时从当前域名所属账号回填）
+function getActiveAccount() {
+  if (state.selectedAccount && state.selectedAccount.id) {
+    return state.selectedAccount;
+  }
+  if (state.selectedZone?.account_id) {
+    const found = state.accounts.find(a => a.id === state.selectedZone.account_id);
+    if (found) {
+      state.selectedAccount = found;
+      return found;
+    }
+    const fallback = {
+      id: state.selectedZone.account_id,
+      name: state.selectedZone.account_name || '',
+      provider: state.selectedZone.provider || '',
+    };
+    state.selectedAccount = fallback;
+    return fallback;
+  }
+  return null;
 }
 
 let currentContextAccount = null;
@@ -959,6 +1001,14 @@ function renderZones(resetSelection = true) {
   const displayZones = filtered.slice(0, renderLimit);
 
   if (filtered.length === 0) {
+    state.selectedZone = null;
+    state.records = [];
+    renderRecords();
+    el.currentZoneTitle.textContent = '未选择域名';
+    el.currentZoneProvider.className = 'provider-pill';
+    el.currentZoneProvider.textContent = '';
+    el.btnAddRecordModal.disabled = true;
+
     let emptyMsg = '该账号下暂无域名';
     let actionBtnHtml = '';
     if (filter === 'hidden') {
@@ -1081,9 +1131,30 @@ function renderZones(resetSelection = true) {
     el.zonesList.appendChild(moreBtn);
   }
 
-  // 默认选中第一个
-  if (resetSelection && (!state.selectedZone || !displayZones.some(z => z.id === state.selectedZone.id))) {
-    selectZone(displayZones[0]);
+  // 域名选中状态与账号绑定同步
+  if (displayZones.length > 0) {
+    if (resetSelection) {
+      const currentTarget = state.selectedZone
+        ? displayZones.find(z => z.id === state.selectedZone.id && (!state.selectedZone.account_id || z.account_id === state.selectedZone.account_id))
+        : null;
+      selectZone(currentTarget || displayZones[0]);
+    } else {
+      if (state.selectedZone) {
+        const freshZone = displayZones.find(z => z.id === state.selectedZone.id && (!state.selectedZone.account_id || z.account_id === state.selectedZone.account_id));
+        if (freshZone) {
+          state.selectedZone = freshZone;
+          if (state.isAllAccountsMode || !state.selectedAccount || state.selectedAccount.id !== freshZone.account_id) {
+            state.selectedAccount = state.accounts.find(a => a.id === freshZone.account_id) || {
+              id: freshZone.account_id,
+              name: freshZone.account_name,
+              provider: freshZone.provider,
+            };
+          }
+        } else {
+          selectZone(displayZones[0]);
+        }
+      }
+    }
   }
 }
 
@@ -1102,8 +1173,8 @@ async function selectZone(zone) {
   if (!zone) return;
   state.selectedZone = zone;
 
-  // 若处于全选模式，根据 zone.account_id 自动定位到实际所属账号
-  if (state.isAllAccountsMode) {
+  // 确保 selectedAccount 始终与当前域名的 account_id 保持绑定
+  if (state.isAllAccountsMode || !state.selectedAccount || state.selectedAccount.id !== zone.account_id) {
     state.selectedAccount = state.accounts.find(a => a.id === zone.account_id) || {
       id: zone.account_id,
       name: zone.account_name,
@@ -1125,18 +1196,19 @@ async function selectZone(zone) {
 }
 
 async function loadRecords() {
-  if (!state.selectedAccount || !state.selectedZone) return;
+  const account = getActiveAccount();
+  if (!account || !state.selectedZone) return;
 
   el.recordsTbody.innerHTML = '<tr><td colspan="8" class="empty-row">正在加载解析记录...</td></tr>';
   try {
     const [res, lines] = await Promise.all([
       backend.listRecords(
-        state.selectedAccount.id,
+        account.id,
         state.selectedZone.id,
         state.selectedZone.name
       ),
       backend.getZoneLines(
-        state.selectedAccount.id,
+        account.id,
         state.selectedZone.id,
         state.selectedZone.name
       ).catch(() => []),
@@ -1228,9 +1300,14 @@ function escapeHtml(text) {
 
 async function handleDeleteRecord(rec) {
   if (!confirm(`确定要删除记录 "${rec.name} -> ${rec.content}" 吗？`)) return;
+  const account = getActiveAccount();
+  if (!account || !account.id || !state.selectedZone) {
+    showToast('删除失败: 未获取到有效的关联账号或域名', 'error');
+    return;
+  }
   try {
     await backend.deleteRecord(
-      state.selectedAccount.id,
+      account.id,
       state.selectedZone.id,
       state.selectedZone.name,
       rec.id
@@ -1279,6 +1356,10 @@ function setupRecordLineSelector(selectedLine) {
 }
 
 function openAddRecordModal() {
+  if (!state.selectedZone) {
+    showToast('请先选择一个域名', 'error');
+    return;
+  }
   document.getElementById('modal-record-title').textContent = '新增解析记录';
   document.getElementById('rec-id').value = '';
   document.getElementById('rec-name').value = '';
@@ -1298,6 +1379,10 @@ function openAddRecordModal() {
 }
 
 function openEditRecordModal(rec) {
+  if (!state.selectedZone) {
+    showToast('请先选择一个域名', 'error');
+    return;
+  }
   document.getElementById('modal-record-title').textContent = '编辑解析记录';
   document.getElementById('rec-id').value = rec.id;
   document.getElementById('rec-name').value = rec.name;
@@ -1359,10 +1444,16 @@ async function handleSaveRecord() {
     recPayload.proxied = proxied;
   }
 
+  const account = getActiveAccount();
+  if (!account || !account.id || !state.selectedZone) {
+    showToast('保存失败: 未获取到有效的关联账号或域名', 'error');
+    return;
+  }
+
   try {
     if (id) {
       await backend.updateRecord(
-        state.selectedAccount.id,
+        account.id,
         state.selectedZone.id,
         state.selectedZone.name,
         recPayload
@@ -1370,7 +1461,7 @@ async function handleSaveRecord() {
       showToast('记录修改成功', 'success');
     } else {
       await backend.createRecord(
-        state.selectedAccount.id,
+        account.id,
         state.selectedZone.id,
         state.selectedZone.name,
         recPayload
@@ -2019,8 +2110,11 @@ function bindEvents() {
   el.btnRefreshZones.addEventListener('click', () => {
     if (state.isAllAccountsMode) {
       loadZones(null);
-    } else if (state.selectedAccount) {
-      loadZones(state.selectedAccount.id);
+    } else {
+      const account = getActiveAccount();
+      if (account) {
+        loadZones(account.id);
+      }
     }
   });
 
